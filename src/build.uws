@@ -1,0 +1,39 @@
+OPTION SPECIALCHAR
+
+path = "..\UBrowserControl.uws"
+const version = "0.0.1"
+
+deletefile(path)
+out = fopen(path, F_READ or F_WRITE8)
+fput(out, UBrowserControl(version))
+
+for file in split(files, "<#CR>")
+    fid = fopen(file, F_READ)
+    script = fget(fid, F_ALLTEXT)
+    fclose(fid)
+    fput(out, script)
+next
+
+fclose(out)
+
+function UBrowserControl(version)
+    result = replace(UBrowserControl, "%version%", version)
+fend
+
+
+textblock UBrowserControl
+module UBrowserControl
+    const Version = "%version%"
+endmodule
+
+endtextblock
+
+textblock files
+.\Modules\BrowserControl.uws
+.\Modules\Settings.uws
+.\Modules\WebSocket.uws
+.\Modules\WebRequest.uws
+.\Modules\WinHttp.uws
+.\Modules\Util.uws
+.\Modules\Json.uws
+endtextblock

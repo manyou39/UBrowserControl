@@ -1,0 +1,396 @@
+module Browser
+    hashtbl sessions
+    hashtbl WebSockets
+    dim NextBid = 0
+    const Chrome  = "chrome.exe"
+    const Firefox = "firefox.exe"
+    const MsEdge  = "msedge.exe"
+    dim WebSocketId = 0
+    dim eventHandler = EMPTY
+
+    procedure Browser
+        if (kindofos() < 30) and ! Settings.Force() then
+            msgbox("サポート外OSです")
+            exitexit
+        endif
+    fend
+
+    function Chrome(port = 9222, headless = FALSE)
+        result = Start(Chrome, port, headless)
+    fend
+    function MsEdge(port = 9222, headless = FALSE)
+        result = Start(MsEdge, port, headless)
+    fend
+    function Firefox(port = 9222, headless = FALSE)
+        result = Start(Firefox, port, headless)
+    fend
+
+    procedure SetEventHandler(proc)
+        eventHandler = proc
+    fend
+
+    procedure Activate(bid)
+        body = NewWebSocketBody("Page.bringToFront")
+        print SendWebSocket(bid, body)
+    fend
+    
+    function Navigate(bid, url, newtab = FALSE)
+        result = EMPTY
+        if newtab then
+            result = NewTab(bid, url)
+        else
+            body = NewWebSocketBody("Page.navigate")
+            AddParam(body, "url", url)
+            SendWebSocket(bid, body)
+        endif
+    fend
+    
+    function NewTab(bid, uri)
+        result = EMPTY
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/new?" + uri)
+        if res[0] = 200 then
+            obj = Json.Parse(res[1])
+            SetCurrentPageId(bid, obj.id)
+        endif
+    fend
+
+    function GetTabList(bid)
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/list")
+        arr = Json.Parse("[]")
+        if res[0] = 200 then
+            list = Json.Parse(res[1])
+            for item in list.ToSafeArray()
+                select item.type
+                    case "page", "frame"
+                        obj = Json.Parse("{}")
+                        Json.AddObject(obj, "id", item.id)
+                        if item.HasValue("title") then
+                            title = item.title
+                        else
+                            title = ""
+                        endif
+                        Json.AddObject(obj, "title", title)
+                        Json.AddObject(obj, "url", item.url)
+                        arr.push(obj)
+                selend
+            next
+        endif
+        result = arr.ToSafeArray()
+    fend
+
+    function CloseTab(bid, pageid)
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/close/" + pageid)
+        result = res[0] = 200
+    fend
+    
+
+    function SwitchTab(bid, pageid)
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/activate/" + pageid)
+        result = res[0] = 200
+        if result then
+            SetCurrentPageId(bid, pageid)
+        endif
+    fend
+    
+    
+    function GetDocument(bid)
+        body = NewWebSocketBody("DOM.getDocument")
+        res = SendWebSocket(bid, body)
+        if res = NOTHING then
+            result = EMPTY
+        else
+            result = res.root.nodeId
+        endif
+    fend
+
+    function FindElement(bid, elementId, selector)
+        body = NewWebSocketBody("DOM.querySelector")
+        AddParam(body, "nodeId", elementId)
+        AddParam(body, "selector", selector)
+        res = SendWebSocket(bid, body)
+        if res = NOTHING then
+            result = EMPTY
+        else
+            result = res.nodeId
+        endif
+    fend
+    
+    function FindElements(bid, elementId, selector)
+        body = NewWebSocketBody("DOM.querySelectorAll")
+        AddParam(body, "nodeId", elementId)
+        AddParam(body, "selector", selector)
+        res = SendWebSocket(bid, body)
+        if res = NOTHING then
+            result = safearray(0, -1)
+        else
+            result = res.nodeIds.ToSafeArray()
+        endif
+    fend
+    
+    function GetAttribute(bid, elementId, attribute)
+        body = NewWebSocketBody("DOM.getAttributes")
+        AddParam(body, "nodeId", elementId)
+        res = SendWebSocket(bid, body)
+        result = EMPTY
+        if res <> NOTHING then
+            result = EMPTY
+            arr = res.attributes.ToSafeArray()
+            for i = 0 to length(arr) - 1 step 2
+                if arr[i] = attribute then
+                    result = arr[i + 1]
+                endif
+            next
+        endif
+    fend
+
+    
+    procedure Dispose()
+        for key in WebSockets
+            WinHttpCloseHandle(WebSockets[key])
+            WebSockets[key] = 0
+        next
+    fend
+
+    // 内部関数群
+
+    function Start(browser, port, headless)
+        result = -1
+        select browser
+            case Chrome, Firefox, MsEdge
+            default
+                msgbox("不正なブラウザ")
+                exit
+        selend
+        if ! FindBrowser(browser, port) then
+            path = Util.GetBrowserPath(browser)
+            select browser
+                case Chrome, MsEdge
+                    command = "<#DBL>" + path + "<#DBL> --remote-debugging-port=" + port
+                    if headless then
+                        command = command + " --disable-gpu --headless"
+                    endif
+                case Firefox
+                    command = "<#DBL>" + path + "<#DBL> --remote-debugging-port " + port
+                    if headless then
+                        command = command + " -headless"
+                    endif
+                default
+                    
+            selend
+            exec(command)
+        endif
+        dim emsg
+        if WaitBrowser(browser, port, emsg) then
+            result = GetNextBid()
+            NewSession(result, browser, "localhost", port)
+            list = GetTabList(result)
+            SetCurrentPageId(result, list[0].id)
+        else
+            if length(emsg) then
+                msgbox(emsg)
+            endif
+        endif
+    fend
+    
+    
+    textblock JsonTemplate
+{
+    
+    "id": 0,
+    "method": null,
+    "params": {}
+}
+    endtextblock
+
+    function NewWebSocketId()
+        WebSocketId = WebSocketId + 1
+        result = WebSocketId
+    fend
+
+    function NewWebSocketBody(method, json = JsonTemplate)
+        result = Json.Parse(json)
+        result.method = method
+        result.id = NewWebSocketId()
+    fend
+
+    procedure AddParam(var body, param, value)
+        Json.AddObject(body.params, param, value)
+    fend
+    
+    function GetWebSocketHandle(bid)
+        session = sessions[bid]
+        if ! is_safearray(session) then
+            result = 0
+            exit
+        endif
+        pageid = GetCurrentPageId(bid)
+
+        if WebSockets[pageid, HASH_EXISTS] then
+            result = WebSockets[pageid]
+        else
+            result = WebSocket.New(session[s_port], pageid, session[s_host])
+            if result <> 0 then
+                WebSockets[pageid] = result
+            endif
+        endif
+    fend
+
+    function SendWebSocket(bid, body, raw = FALSE)
+        h = GetWebSocketHandle(bid)
+        ok = FALSE
+        // 送信したIDでレスポンスが返るまで繰り返す
+        repeat
+            res = WebSocket.Send(h, Json.Stringify(body))
+            if raw then
+                result = res
+                exit
+            else
+                obj = Json.Parse(res)
+                select TRUE
+                    // 結果が帰ってIDが一致したら成功
+                    case obj.HasValue("result")
+                        ok = obj.id = WebSocketId
+                        result = obj.result
+                    // イベント発生
+                    case obj.HasValue("method")
+                        if length(eventHandler) then
+                            j = Json.Stringify(obj, 2, TRUE)
+                            eval(eventHandler + "(obj, j)")
+                        endif
+                    // エラー発生時はNOTHING返して終了
+                    case obj.HasValue("error")
+                        emsg = "WebSocket Error (" + body.method + ")<#CR>" + obj.error.message
+                        msgbox(emsg)
+                        result = NOTHING
+                        exit
+                    default
+                        
+                selend
+            endif
+        until ok
+    fend
+
+    function GetNextBid()
+        NextBid = NextBid + 1
+        result = NextBid
+    fend
+
+    const s_browser = 0
+    const s_host    = 1
+    const s_port    = 2
+    const s_current = 3
+    const session_array_ubound = 3
+    
+    procedure NewSession(bid, browser, host, port)
+        session = safearray(0, session_array_ubound)
+
+        session[s_browser] = browser
+        session[s_host]    = host
+        session[s_port]    = port
+        session[s_current] = EMPTY
+
+        sessions[bid] = session
+    fend
+
+    function is_safearray(v)
+        result = (vartype(v) and VAR_ARRAY) > 0
+    fend
+    
+
+    function SetCurrentPageId(bid, pageid)
+        session = sessions[bid]
+        result = is_safearray(session)
+        if result then
+            session[s_current] = pageid
+            sessions[bid] = session
+        endif
+    fend
+    
+    function GetCurrentPageId(bid)
+        session = sessions[bid]
+        if is_safearray(session) then
+            result = session[s_current]
+        else
+            result = EMPTY
+        endif
+    fend
+
+    function GetPort(bid)
+        session = sessions[bid]
+        if is_safearray(session) then
+            result = session[s_port]
+        else
+            result = 0
+        endif
+    fend
+    
+    function GetHost(bid)
+        session = sessions[bid]
+        if is_safearray(session) then
+            result = session[s_host]
+        else
+            result = EMPTY
+        endif
+    fend
+    
+
+    function FindBrowser(name, port)
+        result = FALSE
+        with createoleobj("WbemScripting.SWbemLocator")
+            with .ConnectServer(".", "Root\StandardCimv2")
+                connection = .ExecQuery("select OwningProcess from MSFT_NetTCPConnection where LocalPort = " + port + " and state = 2")
+                if connection.count then
+                    pid = connection.ItemIndex(0).Properties_("OwningProcess").Value
+                else
+                    exit
+                endif
+            endwith
+            with .ConnectServer()
+                process = .ExecQuery("select Name,ProcessId from win32_process where ProcessId = " + pid)
+                if process.count then
+                    pname = process.ItemIndex(0).Properties_("Name").Value
+                else
+                    exit
+                endif
+            endwith
+        endwith
+        result = name = pname
+    fend
+    
+    function WaitBrowser(name, port, var emsg, timeout = 5)
+        result = FALSE
+        with createoleobj("WbemScripting.SWbemLocator")
+            with .ConnectServer(".", "Root\StandardCimv2")
+                limit = gettime() + timeout
+                repeat
+                    if gettime() > limit then
+                        emsg = port + "で待ち受けているプロセスがありません"
+                        exit
+                    endif
+                    connection = .ExecQuery("select OwningProcess from MSFT_NetTCPConnection where LocalPort = " + port + " and state = 2")
+                until connection.count > 0
+                pid = connection.ItemIndex(0).Properties_("OwningProcess").Value
+            endwith
+            with .ConnectServer()
+                process = .ExecQuery("select Name from win32_process where ProcessId = " + pid)
+                if process.count then
+                    pname = process.ItemIndex(0).Properties_("Name").Value
+                else
+                    exit
+                endif
+            endwith
+        endwith
+        result = name = pname
+        if ! result then
+            emsg = port + "で待ち受けているプロセスが" + name + "ではありません (" + pname + ")"
+        endif
+    fend
+endmodule

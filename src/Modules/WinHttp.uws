@@ -1,0 +1,26 @@
+
+def_dll WinHttpCloseHandle(dword):int:Winhttp.dll
+def_dll WinHttpOpen(wstring, dword, wstring, wstring, dword):dword:Winhttp.dll
+const WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4
+def_dll WinHttpConnect(dword, wstring, uint, dword):dword:Winhttp.dll
+def_dll WinHttpOpenRequest(dword, wstring, wstring, wstring, wstring, wstring, dword):dword:Winhttp.dll
+def_dll WinHttpSetOption(dword, dword, dword, dword):int:Winhttp.dll
+const WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET = 114
+def_dll WinHttpSendRequest(dword, wstring, dword, dword, dword, dword, dword):int:Winhttp.dll
+def_dll WinHttpReceiveResponse(dword, dword):int:Winhttp.dll
+def_dll WinHttpReadData(dword, var string, dword, var dword):int:Winhttp.dll
+def_dll WinHttpQueryHeaders(dword, dword, string, var dword, var dword, dword):int:Winhttp.dll
+const WINHTTP_QUERY_STATUS_CODE = 19
+const WINHTTP_QUERY_FLAG_NUMBER = $20000000
+def_dll WinHttpWebSocketCompleteUpgrade(dword, dword):dword:Winhttp.dll
+def_dll WinHttpWebSocketSend(dword, dword, var string, dword):dword:Winhttp.dll
+def_dll WinHttpWebSocketReceive(dword, var string, dword, var dword, var dword):dword:Winhttp.dll
+const WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE  = 0
+const WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE = 1
+const WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE    = 2
+const WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE   = 3
+const WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE           = 4
+def_dll WinHttpWebSocketClose(dword, var word, dword, dword):dword:Winhttp.dll
+const  WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS = 1000
+def_dll GetLastError():long:kernel32.dll
+

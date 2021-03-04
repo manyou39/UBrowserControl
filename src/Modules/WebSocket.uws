@@ -1,0 +1,101 @@
+module WebSocket
+    const BufferSize = 4096
+    function New(port, pageid, host = "localhost")
+        try
+            dim hSession, hConnection, hRequest, hWebSocket
+            dim emsg
+            hSession = WinHttpOpen("UBrowserControl", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0)
+            if hSession = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpOpen (" + err + ")"
+                exit
+            endif
+
+            hConnection = WinHttpConnect(hSession, host, port, 0)
+            if hConnection = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpConnect (" + err + ")"
+                exit
+            endif
+
+            hRequest = WinHttpOpenRequest(hConnection, "GET", "/devtools/page/" + pageid, NULL, NULL, NULL, 0)
+            if hRequest = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpOpenRequest (" + err + ")"
+                exit
+            endif
+
+            if ! WinHttpSetOption(hRequest, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, 0, 0) then
+                err = GetLastError()
+                emsg = "failed on WinHttpSetOption (" + err + ")"
+                exit
+            endif
+
+            if ! WinHttpSendRequest(hRequest, NULL, 0, 0, 0, 0, 0) then
+                err = GetLastError()
+                emsg = "failed on WinHttpSendRequest (" + err + ")"
+                exit
+            endif
+
+            if ! WinHttpReceiveResponse(hRequest, 0) then
+                err = GetLastError()
+                emsg = "failed on WinHttpReceiveResponse (" + err + ")"
+                exit
+            endif
+
+            hWebSocket = WinHttpWebSocketCompleteUpgrade(hRequest, 0)
+            if hWebSocket = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpWebSocketCompleteUpgrade (" + err + ")"
+                exit
+            endif
+            WinHttpCloseHandle(hRequest)
+            hRequest = 0
+        finally
+            if length(emsg) then
+                if hSession then
+                    WinHttpCloseHandle(hSession)
+                endif
+                if hConnection then
+                    WinHttpCloseHandle(hConnection)
+                endif
+                if hRequest then
+                    WinHttpCloseHandle(hRequest)
+                endif
+                if hWebSocket then
+                    WinHttpCloseHandle(hWebSocket)
+                endif
+                msgbox(emsg)
+                exitexit
+            endif
+        endtry
+        result = hWebSocket
+    fend
+
+    function Send(hWebSocket, json)
+        dim message = encode(json, CODE_UTF8)
+        dim size = lengthb(message)
+        dim buffer = format(chr(0), BufferSize)
+        dim received, buffertype, err, emsg
+        try
+            err = WinHttpWebSocketSend(hWebSocket, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, message, size)
+            if err then
+                emsg = "WinHttpWebSocketSend Error(" + err + ")"
+                exit
+            endif
+            err = WinHttpWebSocketReceive(hWebSocket, buffer, lengthb(buffer), received, buffertype)
+            if err then
+                emsg = "WinHttpWebSocketReceive Error(" + err + ")"
+                exit
+            endif
+        finally
+            if length(emsg) then
+                msgbox(emsg)
+                exitexit
+            endif
+        endtry
+
+        result = buffer
+    fend
+
+endmodule

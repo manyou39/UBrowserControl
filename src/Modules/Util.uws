@@ -1,0 +1,78 @@
+module Util
+    const AppPath = "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\"
+
+    function GetChromePath()
+        result = GetBrowserPath("chrome.exe")
+    fend
+    function GetFirefoxPath()
+        result = GetBrowserPath("firefox.exe")
+    fend
+    function GetMsEdgePath()
+        result = GetBrowserPath("msedge.exe")
+    fend
+
+    function GetBrowserPath(name)
+        result = EMPTY
+        path = EMPTY
+        // iniファイルにパスがあればそれを使う
+        select name
+            case "chrome.exe"
+                path = Settings.Chrome()
+            case "firefox.exe"
+                path = Settings.Firefox()
+            case "msedge.exe"
+                path = Settings.MsEdge()
+            default
+                exit
+        selend
+        if fopen(path, F_EXISTS) then
+            result = path
+            exit
+        endif
+        // レジストリから自動取得
+        with CreateOleObj("Wbemscripting.SWbemLocator")
+            with .ConnectServer("","root\default")
+                with .Get("StdRegProv")
+                    InParams = .Methods_("GetStringValue").Inparameters
+                    InParams.Hdefkey     = $80000002 // HKLM
+                    InParams.Ssubkeyname = "SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + name
+                    InParams.Svaluename  = ""
+                    OutParams = .ExecMethod_("GetStringValue", InParams)
+                    select OutParams.ReturnValue
+                        case 0
+                            path = OutParams.sValue
+                            exit
+                    selend
+                endwith
+            endwith
+        endwith
+        // いずれも取得できなかった場合手入力
+        if GetBrowserPathByInputBox(name, path) then
+            if fopen(path, F_EXISTS) then
+                result = path
+                select name
+                    case "chrome.exe"
+                        Settings.Chrome(path)
+                    case "firefox.exe"
+                        Settings.Firefox(path)
+                    case "msedge.exe"
+                        Settings.MsEdge(path)
+                    default
+                        exit
+                selend
+            endif
+        endif
+    fend
+
+    function GetBrowserPathByInputBox(name, var path)
+        result = FALSE
+        if length(path) then
+            result = TRUE
+        else
+            path = input(name + "のパスを入力してください")
+            if length(path) then
+                result = TRUE
+            endif
+        endif
+    fend
+endmodule

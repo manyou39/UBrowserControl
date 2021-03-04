@@ -1,0 +1,42 @@
+module WebRequest
+    function Send(host, port, path)
+        result = EMPTY
+        try
+            try
+                hSession = WinHttpOpen("UBrowserControl", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0)
+                if hSession = 0 then exit
+                hConnection = WinHttpConnect(hSession, "localhost", port, 0)
+                if hConnection = 0 then exit
+                hRequest = WinHttpOpenRequest(hConnection, "GET", path, NULL, NULL, NULL, 0)
+                if hRequest = 0 then exit
+                if ! WinHttpSendRequest(hRequest, NULL, 0, 0, 0, 0, 0) then
+                    exit
+                endif
+                if ! WinHttpReceiveResponse(hRequest, 0) then
+                    exit
+                endif
+                buffer = format(chr(0), 4096)
+                code = 0
+                WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE or WINHTTP_QUERY_FLAG_NUMBER, NULL, code, 4, 0)
+                WinHttpReadData(hRequest, buffer, lengthb(buffer), 0)
+                result = safearray(0, 1)
+                result[0] = code
+                result[1] = decode(buffer, CODE_UTF8)
+            except
+                print TRY_ERRLINE
+                print TRY_ERRMSG
+            endtry
+        finally
+            if hSession then
+                WinHttpCloseHandle(hSession)
+            endif
+            if hConnection then
+                WinHttpCloseHandle(hConnection)
+            endif
+            if hRequest then
+                WinHttpCloseHandle(hRequest)
+            endif
+        endtry
+    fend
+    
+endmodule

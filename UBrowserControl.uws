@@ -1,0 +1,1300 @@
+module UBrowserControl
+    const Version = "0.0.1"
+endmodule
+
+module Browser
+    hashtbl sessions
+    hashtbl WebSockets
+    dim NextBid = 0
+    const Chrome  = "chrome.exe"
+    const Firefox = "firefox.exe"
+    const MsEdge  = "msedge.exe"
+    dim WebSocketId = 0
+    dim eventHandler = EMPTY
+
+    procedure Browser
+        if (kindofos() < 30) and ! Settings.Force() then
+            msgbox("サポート外OSです")
+            exitexit
+        endif
+    fend
+
+    function Chrome(port = 9222, headless = FALSE)
+        result = Start(Chrome, port, headless)
+    fend
+    function MsEdge(port = 9222, headless = FALSE)
+        result = Start(MsEdge, port, headless)
+    fend
+    function Firefox(port = 9222, headless = FALSE)
+        result = Start(Firefox, port, headless)
+    fend
+
+    procedure SetEventHandler(proc)
+        eventHandler = proc
+    fend
+
+    procedure Activate(bid)
+        body = NewWebSocketBody("Page.bringToFront")
+        print SendWebSocket(bid, body)
+    fend
+    
+    function Navigate(bid, url, newtab = FALSE)
+        result = EMPTY
+        if newtab then
+            result = NewTab(bid, url)
+        else
+            body = NewWebSocketBody("Page.navigate")
+            AddParam(body, "url", url)
+            SendWebSocket(bid, body)
+        endif
+    fend
+    
+    function NewTab(bid, uri)
+        result = EMPTY
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/new?" + uri)
+        if res[0] = 200 then
+            obj = Json.Parse(res[1])
+            SetCurrentPageId(bid, obj.id)
+        endif
+    fend
+
+    function GetTabList(bid)
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/list")
+        arr = Json.Parse("[]")
+        if res[0] = 200 then
+            list = Json.Parse(res[1])
+            for item in list.ToSafeArray()
+                select item.type
+                    case "page", "frame"
+                        obj = Json.Parse("{}")
+                        Json.AddObject(obj, "id", item.id)
+                        if item.HasValue("title") then
+                            title = item.title
+                        else
+                            title = ""
+                        endif
+                        Json.AddObject(obj, "title", title)
+                        Json.AddObject(obj, "url", item.url)
+                        arr.push(obj)
+                selend
+            next
+        endif
+        result = arr.ToSafeArray()
+    fend
+
+    function CloseTab(bid, pageid)
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/close/" + pageid)
+        result = res[0] = 200
+    fend
+    
+
+    function SwitchTab(bid, pageid)
+        port = GetPort(bid)
+        host = GetHost(bid)
+        res = WebRequest.Send(host, port, "/json/activate/" + pageid)
+        result = res[0] = 200
+        if result then
+            SetCurrentPageId(bid, pageid)
+        endif
+    fend
+    
+    
+    function GetDocument(bid)
+        body = NewWebSocketBody("DOM.getDocument")
+        res = SendWebSocket(bid, body)
+        if res = NOTHING then
+            result = EMPTY
+        else
+            result = res.root.nodeId
+        endif
+    fend
+
+    function FindElement(bid, elementId, selector)
+        body = NewWebSocketBody("DOM.querySelector")
+        AddParam(body, "nodeId", elementId)
+        AddParam(body, "selector", selector)
+        res = SendWebSocket(bid, body)
+        if res = NOTHING then
+            result = EMPTY
+        else
+            result = res.nodeId
+        endif
+    fend
+    
+    function FindElements(bid, elementId, selector)
+        body = NewWebSocketBody("DOM.querySelectorAll")
+        AddParam(body, "nodeId", elementId)
+        AddParam(body, "selector", selector)
+        res = SendWebSocket(bid, body)
+        if res = NOTHING then
+            result = safearray(0, -1)
+        else
+            result = res.nodeIds.ToSafeArray()
+        endif
+    fend
+    
+    function GetAttribute(bid, elementId, attribute)
+        body = NewWebSocketBody("DOM.getAttributes")
+        AddParam(body, "nodeId", elementId)
+        res = SendWebSocket(bid, body)
+        result = EMPTY
+        if res <> NOTHING then
+            result = EMPTY
+            arr = res.attributes.ToSafeArray()
+            for i = 0 to length(arr) - 1 step 2
+                if arr[i] = attribute then
+                    result = arr[i + 1]
+                endif
+            next
+        endif
+    fend
+
+    
+    procedure Dispose()
+        for key in WebSockets
+            WinHttpCloseHandle(WebSockets[key])
+            WebSockets[key] = 0
+        next
+    fend
+
+    // 内部関数群
+
+    function Start(browser, port, headless)
+        result = -1
+        select browser
+            case Chrome, Firefox, MsEdge
+            default
+                msgbox("不正なブラウザ")
+                exit
+        selend
+        if ! FindBrowser(browser, port) then
+            path = Util.GetBrowserPath(browser)
+            select browser
+                case Chrome, MsEdge
+                    command = "<#DBL>" + path + "<#DBL> --remote-debugging-port=" + port
+                    if headless then
+                        command = command + " --disable-gpu --headless"
+                    endif
+                case Firefox
+                    command = "<#DBL>" + path + "<#DBL> --remote-debugging-port " + port
+                    if headless then
+                        command = command + " -headless"
+                    endif
+                default
+                    
+            selend
+            exec(command)
+        endif
+        dim emsg
+        if WaitBrowser(browser, port, emsg) then
+            result = GetNextBid()
+            NewSession(result, browser, "localhost", port)
+            list = GetTabList(result)
+            SetCurrentPageId(result, list[0].id)
+        else
+            if length(emsg) then
+                msgbox(emsg)
+            endif
+        endif
+    fend
+    
+    
+    textblock JsonTemplate
+{
+    
+    "id": 0,
+    "method": null,
+    "params": {}
+}
+    endtextblock
+
+    function NewWebSocketId()
+        WebSocketId = WebSocketId + 1
+        result = WebSocketId
+    fend
+
+    function NewWebSocketBody(method, json = JsonTemplate)
+        result = Json.Parse(json)
+        result.method = method
+        result.id = NewWebSocketId()
+    fend
+
+    procedure AddParam(var body, param, value)
+        Json.AddObject(body.params, param, value)
+    fend
+    
+    function GetWebSocketHandle(bid)
+        session = sessions[bid]
+        if ! is_safearray(session) then
+            result = 0
+            exit
+        endif
+        pageid = GetCurrentPageId(bid)
+
+        if WebSockets[pageid, HASH_EXISTS] then
+            result = WebSockets[pageid]
+        else
+            result = WebSocket.New(session[s_port], pageid, session[s_host])
+            if result <> 0 then
+                WebSockets[pageid] = result
+            endif
+        endif
+    fend
+
+    function SendWebSocket(bid, body, raw = FALSE)
+        h = GetWebSocketHandle(bid)
+        ok = FALSE
+        // 送信したIDでレスポンスが返るまで繰り返す
+        repeat
+            res = WebSocket.Send(h, Json.Stringify(body))
+            if raw then
+                result = res
+                exit
+            else
+                obj = Json.Parse(res)
+                select TRUE
+                    // 結果が帰ってIDが一致したら成功
+                    case obj.HasValue("result")
+                        ok = obj.id = WebSocketId
+                        result = obj.result
+                    // イベント発生
+                    case obj.HasValue("method")
+                        if length(eventHandler) then
+                            j = Json.Stringify(obj, 2, TRUE)
+                            eval(eventHandler + "(obj, j)")
+                        endif
+                    // エラー発生時はNOTHING返して終了
+                    case obj.HasValue("error")
+                        emsg = "WebSocket Error (" + body.method + ")<#CR>" + obj.error.message
+                        msgbox(emsg)
+                        result = NOTHING
+                        exit
+                    default
+                        
+                selend
+            endif
+        until ok
+    fend
+
+    function GetNextBid()
+        NextBid = NextBid + 1
+        result = NextBid
+    fend
+
+    const s_browser = 0
+    const s_host    = 1
+    const s_port    = 2
+    const s_current = 3
+    const session_array_ubound = 3
+    
+    procedure NewSession(bid, browser, host, port)
+        session = safearray(0, session_array_ubound)
+
+        session[s_browser] = browser
+        session[s_host]    = host
+        session[s_port]    = port
+        session[s_current] = EMPTY
+
+        sessions[bid] = session
+    fend
+
+    function is_safearray(v)
+        result = (vartype(v) and VAR_ARRAY) > 0
+    fend
+    
+
+    function SetCurrentPageId(bid, pageid)
+        session = sessions[bid]
+        result = is_safearray(session)
+        if result then
+            session[s_current] = pageid
+            sessions[bid] = session
+        endif
+    fend
+    
+    function GetCurrentPageId(bid)
+        session = sessions[bid]
+        if is_safearray(session) then
+            result = session[s_current]
+        else
+            result = EMPTY
+        endif
+    fend
+
+    function GetPort(bid)
+        session = sessions[bid]
+        if is_safearray(session) then
+            result = session[s_port]
+        else
+            result = 0
+        endif
+    fend
+    
+    function GetHost(bid)
+        session = sessions[bid]
+        if is_safearray(session) then
+            result = session[s_host]
+        else
+            result = EMPTY
+        endif
+    fend
+    
+
+    function FindBrowser(name, port)
+        result = FALSE
+        with createoleobj("WbemScripting.SWbemLocator")
+            with .ConnectServer(".", "Root\StandardCimv2")
+                connection = .ExecQuery("select OwningProcess from MSFT_NetTCPConnection where LocalPort = " + port + " and state = 2")
+                if connection.count then
+                    pid = connection.ItemIndex(0).Properties_("OwningProcess").Value
+                else
+                    exit
+                endif
+            endwith
+            with .ConnectServer()
+                process = .ExecQuery("select Name,ProcessId from win32_process where ProcessId = " + pid)
+                if process.count then
+                    pname = process.ItemIndex(0).Properties_("Name").Value
+                else
+                    exit
+                endif
+            endwith
+        endwith
+        result = name = pname
+    fend
+    
+    function WaitBrowser(name, port, var emsg, timeout = 5)
+        result = FALSE
+        with createoleobj("WbemScripting.SWbemLocator")
+            with .ConnectServer(".", "Root\StandardCimv2")
+                limit = gettime() + timeout
+                repeat
+                    if gettime() > limit then
+                        emsg = port + "で待ち受けているプロセスがありません"
+                        exit
+                    endif
+                    connection = .ExecQuery("select OwningProcess from MSFT_NetTCPConnection where LocalPort = " + port + " and state = 2")
+                until connection.count > 0
+                pid = connection.ItemIndex(0).Properties_("OwningProcess").Value
+            endwith
+            with .ConnectServer()
+                process = .ExecQuery("select Name from win32_process where ProcessId = " + pid)
+                if process.count then
+                    pname = process.ItemIndex(0).Properties_("Name").Value
+                else
+                    exit
+                endif
+            endwith
+        endwith
+        result = name = pname
+        if ! result then
+            emsg = port + "で待ち受けているプロセスが" + name + "ではありません (" + pname + ")"
+        endif
+    fend
+endmodule
+
+module Settings
+    const IniFile = "UBrowserControl.ini"
+
+    function Force(b = NULL)
+        section = "UBrowserControl"
+        key = "Force"
+        if b <> NULL then
+            writeini(section, key, val(b, 0), IniFile)
+            result = FALSE
+        else
+            result = val(readini(section, key, IniFile), 0) <> 0
+        endif
+    fend
+    function Chrome(path = NULL)
+        section = "BrowserPath"
+        key = "Chrome"
+        if path = NULL then
+            result = readini(section, key, IniFile)
+        else
+            writeini(section, key, path, IniFile)
+            result = EMPTY
+        endif
+    fend
+    function MsEdge(path = NULL)
+        section = "BrowserPath"
+        key = "MsEdge"
+        if path = NULL then
+            result = readini(section, key, IniFile)
+        else
+            writeini(section, key, path, IniFile)
+            result = EMPTY
+        endif
+    fend
+    function Firefox(path = NULL)
+        section = "BrowserPath"
+        key = "Firefox"
+        if path = NULL then
+            result = readini(section, key, IniFile)
+        else
+            writeini(section, key, path, IniFile)
+            result = EMPTY
+        endif
+    fend
+    
+    procedure Init()
+        Force(1)
+        Chrome("")
+        MsEdge("")
+        Firefox("")
+    fend
+    
+endmodule
+
+module WebSocket
+    const BufferSize = 4096
+    function New(port, pageid, host = "localhost")
+        try
+            dim hSession, hConnection, hRequest, hWebSocket
+            dim emsg
+            hSession = WinHttpOpen("UBrowserControl", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0)
+            if hSession = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpOpen (" + err + ")"
+                exit
+            endif
+
+            hConnection = WinHttpConnect(hSession, host, port, 0)
+            if hConnection = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpConnect (" + err + ")"
+                exit
+            endif
+
+            hRequest = WinHttpOpenRequest(hConnection, "GET", "/devtools/page/" + pageid, NULL, NULL, NULL, 0)
+            if hRequest = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpOpenRequest (" + err + ")"
+                exit
+            endif
+
+            if ! WinHttpSetOption(hRequest, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, 0, 0) then
+                err = GetLastError()
+                emsg = "failed on WinHttpSetOption (" + err + ")"
+                exit
+            endif
+
+            if ! WinHttpSendRequest(hRequest, NULL, 0, 0, 0, 0, 0) then
+                err = GetLastError()
+                emsg = "failed on WinHttpSendRequest (" + err + ")"
+                exit
+            endif
+
+            if ! WinHttpReceiveResponse(hRequest, 0) then
+                err = GetLastError()
+                emsg = "failed on WinHttpReceiveResponse (" + err + ")"
+                exit
+            endif
+
+            hWebSocket = WinHttpWebSocketCompleteUpgrade(hRequest, 0)
+            if hWebSocket = 0 then
+                err = GetLastError()
+                emsg = "failed on WinHttpWebSocketCompleteUpgrade (" + err + ")"
+                exit
+            endif
+            WinHttpCloseHandle(hRequest)
+            hRequest = 0
+        finally
+            if length(emsg) then
+                if hSession then
+                    WinHttpCloseHandle(hSession)
+                endif
+                if hConnection then
+                    WinHttpCloseHandle(hConnection)
+                endif
+                if hRequest then
+                    WinHttpCloseHandle(hRequest)
+                endif
+                if hWebSocket then
+                    WinHttpCloseHandle(hWebSocket)
+                endif
+                msgbox(emsg)
+                exitexit
+            endif
+        endtry
+        result = hWebSocket
+    fend
+
+    function Send(hWebSocket, json)
+        dim message = encode(json, CODE_UTF8)
+        dim size = lengthb(message)
+        dim buffer = format(chr(0), BufferSize)
+        dim received, buffertype, err, emsg
+        try
+            err = WinHttpWebSocketSend(hWebSocket, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, message, size)
+            if err then
+                emsg = "WinHttpWebSocketSend Error(" + err + ")"
+                exit
+            endif
+            err = WinHttpWebSocketReceive(hWebSocket, buffer, lengthb(buffer), received, buffertype)
+            if err then
+                emsg = "WinHttpWebSocketReceive Error(" + err + ")"
+                exit
+            endif
+        finally
+            if length(emsg) then
+                msgbox(emsg)
+                exitexit
+            endif
+        endtry
+
+        result = buffer
+    fend
+
+endmodule
+
+module WebRequest
+    function Send(host, port, path)
+        result = EMPTY
+        try
+            try
+                hSession = WinHttpOpen("UBrowserControl", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0)
+                if hSession = 0 then exit
+                hConnection = WinHttpConnect(hSession, "localhost", port, 0)
+                if hConnection = 0 then exit
+                hRequest = WinHttpOpenRequest(hConnection, "GET", path, NULL, NULL, NULL, 0)
+                if hRequest = 0 then exit
+                if ! WinHttpSendRequest(hRequest, NULL, 0, 0, 0, 0, 0) then
+                    exit
+                endif
+                if ! WinHttpReceiveResponse(hRequest, 0) then
+                    exit
+                endif
+                buffer = format(chr(0), 4096)
+                code = 0
+                WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE or WINHTTP_QUERY_FLAG_NUMBER, NULL, code, 4, 0)
+                WinHttpReadData(hRequest, buffer, lengthb(buffer), 0)
+                result = safearray(0, 1)
+                result[0] = code
+                result[1] = decode(buffer, CODE_UTF8)
+            except
+                print TRY_ERRLINE
+                print TRY_ERRMSG
+            endtry
+        finally
+            if hSession then
+                WinHttpCloseHandle(hSession)
+            endif
+            if hConnection then
+                WinHttpCloseHandle(hConnection)
+            endif
+            if hRequest then
+                WinHttpCloseHandle(hRequest)
+            endif
+        endtry
+    fend
+    
+endmodule
+
+
+def_dll WinHttpCloseHandle(dword):int:Winhttp.dll
+def_dll WinHttpOpen(wstring, dword, wstring, wstring, dword):dword:Winhttp.dll
+const WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4
+def_dll WinHttpConnect(dword, wstring, uint, dword):dword:Winhttp.dll
+def_dll WinHttpOpenRequest(dword, wstring, wstring, wstring, wstring, wstring, dword):dword:Winhttp.dll
+def_dll WinHttpSetOption(dword, dword, dword, dword):int:Winhttp.dll
+const WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET = 114
+def_dll WinHttpSendRequest(dword, wstring, dword, dword, dword, dword, dword):int:Winhttp.dll
+def_dll WinHttpReceiveResponse(dword, dword):int:Winhttp.dll
+def_dll WinHttpReadData(dword, var string, dword, var dword):int:Winhttp.dll
+def_dll WinHttpQueryHeaders(dword, dword, string, var dword, var dword, dword):int:Winhttp.dll
+const WINHTTP_QUERY_STATUS_CODE = 19
+const WINHTTP_QUERY_FLAG_NUMBER = $20000000
+def_dll WinHttpWebSocketCompleteUpgrade(dword, dword):dword:Winhttp.dll
+def_dll WinHttpWebSocketSend(dword, dword, var string, dword):dword:Winhttp.dll
+def_dll WinHttpWebSocketReceive(dword, var string, dword, var dword, var dword):dword:Winhttp.dll
+const WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE  = 0
+const WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE = 1
+const WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE    = 2
+const WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE   = 3
+const WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE           = 4
+def_dll WinHttpWebSocketClose(dword, var word, dword, dword):dword:Winhttp.dll
+const  WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS = 1000
+def_dll GetLastError():long:kernel32.dll
+
+
+module Util
+    const AppPath = "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\"
+
+    function GetChromePath()
+        result = GetBrowserPath("chrome.exe")
+    fend
+    function GetFirefoxPath()
+        result = GetBrowserPath("firefox.exe")
+    fend
+    function GetMsEdgePath()
+        result = GetBrowserPath("msedge.exe")
+    fend
+
+    function GetBrowserPath(name)
+        result = EMPTY
+        path = EMPTY
+        // iniファイルにパスがあればそれを使う
+        select name
+            case "chrome.exe"
+                path = Settings.Chrome()
+            case "firefox.exe"
+                path = Settings.Firefox()
+            case "msedge.exe"
+                path = Settings.MsEdge()
+            default
+                exit
+        selend
+        if fopen(path, F_EXISTS) then
+            result = path
+            exit
+        endif
+        // レジストリから自動取得
+        with CreateOleObj("Wbemscripting.SWbemLocator")
+            with .ConnectServer("","root\default")
+                with .Get("StdRegProv")
+                    InParams = .Methods_("GetStringValue").Inparameters
+                    InParams.Hdefkey     = $80000002 // HKLM
+                    InParams.Ssubkeyname = "SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + name
+                    InParams.Svaluename  = ""
+                    OutParams = .ExecMethod_("GetStringValue", InParams)
+                    select OutParams.ReturnValue
+                        case 0
+                            path = OutParams.sValue
+                            exit
+                    selend
+                endwith
+            endwith
+        endwith
+        // いずれも取得できなかった場合手入力
+        if GetBrowserPathByInputBox(name, path) then
+            if fopen(path, F_EXISTS) then
+                result = path
+                select name
+                    case "chrome.exe"
+                        Settings.Chrome(path)
+                    case "firefox.exe"
+                        Settings.Firefox(path)
+                    case "msedge.exe"
+                        Settings.MsEdge(path)
+                    default
+                        exit
+                selend
+            endif
+        endif
+    fend
+
+    function GetBrowserPathByInputBox(name, var path)
+        result = FALSE
+        if length(path) then
+            result = TRUE
+        else
+            path = input(name + "のパスを入力してください")
+            if length(path) then
+                result = TRUE
+            endif
+        endif
+    fend
+endmodule
+
+
+module JSON
+    procedure JSON
+        ScriptControl = createoleobj("ScriptControl")
+        with ScriptControl
+            .Language = "JScript"
+            .ExecuteStatement(json2)
+            .ExecuteStatement(jsStatement)
+            CodeObject = .CodeObject
+        endwith
+    fend
+    
+    dim ScriptControl,CodeObject
+
+    function New(json = "{}")
+        result = Parse(json)
+    fend
+
+    function Parse(str)
+        try
+            result = CodeObject.JSON.parse(str)
+        except
+            result = NOTHING
+        endtry
+    fend
+    
+    function Stringify(json, indent = "", CRLF = FALSE)
+        try
+            result = CodeObject.JSON.stringify(json, null, indent)
+            if CRLF then
+                result = replace(result, chr(10), "<#CR>")
+            endif
+        except
+            result = EMPTY
+        endtry
+    fend
+
+    function AddObject(base, name, value)
+        try
+            CodeObject.Add(base, name, value)
+            result = TRUE
+        except
+            result = FALSE
+        endtry
+    fend
+    
+    textblock jsStatement
+        // 配列アクセス用
+        // 第二引数に値を渡した場合は代入、省略した場合は値取得
+        Array.prototype.Item = function(i, value)
+        {
+            if (value === undefined)
+                return this[i];
+            this[i] = value;
+        }
+        Array.prototype.item = Array.prototype.Item;
+
+        Array.prototype.ToSafeArray = function()
+        {
+            var dictionary = new ActiveXObject("Scripting.Dictionary");
+            for (var i = 0; i < this.length; i++) {
+                dictionary.add(i, this[i]);
+            }
+            return dictionary.Items();
+        }
+
+        // Object追加用、AddObject()で使う
+        function Add(obj, name, value)
+        {
+            obj[name] = value;
+        }
+
+        Object.prototype.GetValue = function(name)
+        {
+            return this[name];
+        }
+
+        Object.prototype.HasValue = function(name)
+        {
+            return this[name] ? true: false;
+        }
+    endtextblock
+    
+endmodule
+
+textblock json2
+//  json2.js
+//  2016-05-01
+//  Public Domain.
+//  NO WARRANTY EXPRESSED OR IMPLIED. USE AT YOUR OWN RISK.
+//  See http://www.JSON.org/js.html
+//  This code should be minified before deployment.
+//  See http://javascript.crockford.com/jsmin.html
+
+//  USE YOUR OWN COPY. IT IS EXTREMELY UNWISE TO LOAD CODE FROM SERVERS YOU DO
+//  NOT CONTROL.
+
+//  This file creates a global JSON object containing two methods: stringify
+//  and parse. This file is provides the ES5 JSON capability to ES3 systems.
+//  If a project might run on IE8 or earlier, then this file should be included.
+//  This file does nothing on ES5 systems.
+
+//      JSON.stringify(value, replacer, space)
+//          value       any JavaScript value, usually an object or array.
+//          replacer    an optional parameter that determines how object
+//                      values are stringified for objects. It can be a
+//                      function or an array of strings.
+//          space       an optional parameter that specifies the indentation
+//                      of nested structures. If it is omitted, the text will
+//                      be packed without extra whitespace. If it is a number,
+//                      it will specify the number of spaces to indent at each
+//                      level. If it is a string (such as "\t" or "&nbsp;"),
+//                      it contains the characters used to indent at each level.
+//          This method produces a JSON text from a JavaScript value.
+//          When an object value is found, if the object contains a toJSON
+//          method, its toJSON method will be called and the result will be
+//          stringified. A toJSON method does not serialize: it returns the
+//          value represented by the name/value pair that should be serialized,
+//          or undefined if nothing should be serialized. The toJSON method
+//          will be passed the key associated with the value, and this will be
+//          bound to the value.
+
+//          For example, this would serialize Dates as ISO strings.
+
+//              Date.prototype.toJSON = function (key) {
+//                  function f(n) {
+//                      // Format integers to have at least two digits.
+//                      return (n < 10)
+//                          ? "0" + n
+//                          : n;
+//                  }
+//                  return this.getUTCFullYear()   + "-" +
+//                       f(this.getUTCMonth() + 1) + "-" +
+//                       f(this.getUTCDate())      + "T" +
+//                       f(this.getUTCHours())     + ":" +
+//                       f(this.getUTCMinutes())   + ":" +
+//                       f(this.getUTCSeconds())   + "Z";
+//              };
+
+//          You can provide an optional replacer method. It will be passed the
+//          key and value of each member, with this bound to the containing
+//          object. The value that is returned from your method will be
+//          serialized. If your method returns undefined, then the member will
+//          be excluded from the serialization.
+
+//          If the replacer parameter is an array of strings, then it will be
+//          used to select the members to be serialized. It filters the results
+//          such that only members with keys listed in the replacer array are
+//          stringified.
+
+//          Values that do not have JSON representations, such as undefined or
+//          functions, will not be serialized. Such values in objects will be
+//          dropped; in arrays they will be replaced with null. You can use
+//          a replacer function to replace those with JSON values.
+
+//          JSON.stringify(undefined) returns undefined.
+
+//          The optional space parameter produces a stringification of the
+//          value that is filled with line breaks and indentation to make it
+//          easier to read.
+
+//          If the space parameter is a non-empty string, then that string will
+//          be used for indentation. If the space parameter is a number, then
+//          the indentation will be that many spaces.
+
+//          Example:
+
+//          text = JSON.stringify(["e", {pluribus: "unum"}]);
+//          // text is '["e",{"pluribus":"unum"}]'
+
+//          text = JSON.stringify(["e", {pluribus: "unum"}], null, "\t");
+//          // text is '[\n\t"e",\n\t{\n\t\t"pluribus": "unum"\n\t}\n]'
+
+//          text = JSON.stringify([new Date()], function (key, value) {
+//              return this[key] instanceof Date
+//                  ? "Date(" + this[key] + ")"
+//                  : value;
+//          });
+//          // text is '["Date(---current time---)"]'
+
+//      JSON.parse(text, reviver)
+//          This method parses a JSON text to produce an object or array.
+//          It can throw a SyntaxError exception.
+
+//          The optional reviver parameter is a function that can filter and
+//          transform the results. It receives each of the keys and values,
+//          and its return value is used instead of the original value.
+//          If it returns what it received, then the structure is not modified.
+//          If it returns undefined then the member is deleted.
+
+//          Example:
+
+//          // Parse the text. Values that look like ISO date strings will
+//          // be converted to Date objects.
+
+//          myData = JSON.parse(text, function (key, value) {
+//              var a;
+//              if (typeof value === "string") {
+//                  a =
+//   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/.exec(value);
+//                  if (a) {
+//                      return new Date(Date.UTC(+a[1], +a[2] - 1, +a[3], +a[4],
+//                          +a[5], +a[6]));
+//                  }
+//              }
+//              return value;
+//          });
+
+//          myData = JSON.parse('["Date(09/09/2001)"]', function (key, value) {
+//              var d;
+//              if (typeof value === "string" &&
+//                      value.slice(0, 5) === "Date(" &&
+//                      value.slice(-1) === ")") {
+//                  d = new Date(value.slice(5, -1));
+//                  if (d) {
+//                      return d;
+//                  }
+//              }
+//              return value;
+//          });
+
+//  This is a reference implementation. You are free to copy, modify, or
+//  redistribute.
+
+/*jslint
+    eval, for, this
+*/
+
+/*property
+    JSON, apply, call, charCodeAt, getUTCDate, getUTCFullYear, getUTCHours,
+    getUTCMinutes, getUTCMonth, getUTCSeconds, hasOwnProperty, join,
+    lastIndex, length, parse, prototype, push, replace, slice, stringify,
+    test, toJSON, toString, valueOf
+*/
+
+
+// Create a JSON object only if one does not already exist. We create the
+// methods in a closure to avoid creating global variables.
+
+if (typeof JSON !== "object") {
+    JSON = {};
+}
+
+(function () {
+    "use strict";
+
+    var rx_one = /^[\],:{}\s]*$/;
+    var rx_two = /\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g;
+    var rx_three = /"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g;
+    var rx_four = /(?:^|:|,)(?:\s*\[)+/g;
+    var rx_escapable = /[\\\"\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g;
+    var rx_dangerous = /[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g;
+
+    function f(n) {
+        // Format integers to have at least two digits.
+        return n < 10
+            ? "0" + n
+            : n;
+    }
+
+    function this_value() {
+        return this.valueOf();
+    }
+
+    if (typeof Date.prototype.toJSON !== "function") {
+
+        Date.prototype.toJSON = function () {
+
+            return isFinite(this.valueOf())
+                ? this.getUTCFullYear() + "-" +
+                        f(this.getUTCMonth() + 1) + "-" +
+                        f(this.getUTCDate()) + "T" +
+                        f(this.getUTCHours()) + ":" +
+                        f(this.getUTCMinutes()) + ":" +
+                        f(this.getUTCSeconds()) + "Z"
+                : null;
+        };
+
+        Boolean.prototype.toJSON = this_value;
+        Number.prototype.toJSON = this_value;
+        String.prototype.toJSON = this_value;
+    }
+
+    var gap;
+    var indent;
+    var meta;
+    var rep;
+
+
+    function quote(string) {
+
+// If the string contains no control characters, no quote characters, and no
+// backslash characters, then we can safely slap some quotes around it.
+// Otherwise we must also replace the offending characters with safe escape
+// sequences.
+
+        rx_escapable.lastIndex = 0;
+        return rx_escapable.test(string)
+            ? "\"" + string.replace(rx_escapable, function (a) {
+                var c = meta[a];
+                return typeof c === "string"
+                    ? c
+                    : "\\u" + ("0000" + a.charCodeAt(0).toString(16)).slice(-4);
+            }) + "\""
+            : "\"" + string + "\"";
+    }
+
+
+    function str(key, holder) {
+
+// Produce a string from holder[key].
+
+        var i;          // The loop counter.
+        var k;          // The member key.
+        var v;          // The member value.
+        var length;
+        var mind = gap;
+        var partial;
+        var value = holder[key];
+
+// If the value has a toJSON method, call it to obtain a replacement value.
+
+        if (value && typeof value === "object" &&
+                typeof value.toJSON === "function") {
+            value = value.toJSON(key);
+        }
+
+// If we were called with a replacer function, then call the replacer to
+// obtain a replacement value.
+
+        if (typeof rep === "function") {
+            value = rep.call(holder, key, value);
+        }
+
+// What happens next depends on the value's type.
+
+        switch (typeof value) {
+        case "string":
+            return quote(value);
+
+        case "number":
+
+// JSON numbers must be finite. Encode non-finite numbers as null.
+
+            return isFinite(value)
+                ? String(value)
+                : "null";
+
+        case "boolean":
+        case "null":
+
+// If the value is a boolean or null, convert it to a string. Note:
+// typeof null does not produce "null". The case is included here in
+// the remote chance that this gets fixed someday.
+
+            return String(value);
+
+// If the type is "object", we might be dealing with an object or an array or
+// null.
+
+        case "object":
+
+// Due to a specification blunder in ECMAScript, typeof null is "object",
+// so watch out for that case.
+
+            if (!value) {
+                return "null";
+            }
+
+// Make an array to hold the partial results of stringifying this object value.
+
+            gap += indent;
+            partial = [];
+
+// Is the value an array?
+
+            if (Object.prototype.toString.apply(value) === "[object Array]") {
+
+// The value is an array. Stringify every element. Use null as a placeholder
+// for non-JSON values.
+
+                length = value.length;
+                for (i = 0; i < length; i += 1) {
+                    partial[i] = str(i, value) || "null";
+                }
+
+// Join all of the elements together, separated with commas, and wrap them in
+// brackets.
+
+                v = partial.length === 0
+                    ? "[]"
+                    : gap
+                        ? "[\n" + gap + partial.join(",\n" + gap) + "\n" + mind + "]"
+                        : "[" + partial.join(",") + "]";
+                gap = mind;
+                return v;
+            }
+
+// If the replacer is an array, use it to select the members to be stringified.
+
+            if (rep && typeof rep === "object") {
+                length = rep.length;
+                for (i = 0; i < length; i += 1) {
+                    if (typeof rep[i] === "string") {
+                        k = rep[i];
+                        v = str(k, value);
+                        if (v) {
+                            partial.push(quote(k) + (
+                                gap
+                                    ? ": "
+                                    : ":"
+                            ) + v);
+                        }
+                    }
+                }
+            } else {
+
+// Otherwise, iterate through all of the keys in the object.
+
+                for (k in value) {
+                    if (Object.prototype.hasOwnProperty.call(value, k)) {
+                        v = str(k, value);
+                        if (v) {
+                            partial.push(quote(k) + (
+                                gap
+                                    ? ": "
+                                    : ":"
+                            ) + v);
+                        }
+                    }
+                }
+            }
+
+// Join all of the member texts together, separated with commas,
+// and wrap them in braces.
+
+            v = partial.length === 0
+                ? "{}"
+                : gap
+                    ? "{\n" + gap + partial.join(",\n" + gap) + "\n" + mind + "}"
+                    : "{" + partial.join(",") + "}";
+            gap = mind;
+            return v;
+        }
+    }
+
+// If the JSON object does not yet have a stringify method, give it one.
+
+    if (typeof JSON.stringify !== "function") {
+        meta = {    // table of character substitutions
+            "\b": "\\b",
+            "\t": "\\t",
+            "\n": "\\n",
+            "\f": "\\f",
+            "\r": "\\r",
+            "\"": "\\\"",
+            "\\": "\\\\"
+        };
+        JSON.stringify = function (value, replacer, space) {
+
+// The stringify method takes a value and an optional replacer, and an optional
+// space parameter, and returns a JSON text. The replacer can be a function
+// that can replace values, or an array of strings that will select the keys.
+// A default replacer method can be provided. Use of the space parameter can
+// produce text that is more easily readable.
+
+            var i;
+            gap = "";
+            indent = "";
+
+// If the space parameter is a number, make an indent string containing that
+// many spaces.
+
+            if (typeof space === "number") {
+                for (i = 0; i < space; i += 1) {
+                    indent += " ";
+                }
+
+// If the space parameter is a string, it will be used as the indent string.
+
+            } else if (typeof space === "string") {
+                indent = space;
+            }
+
+// If there is a replacer, it must be a function or an array.
+// Otherwise, throw an error.
+
+            rep = replacer;
+            if (replacer && typeof replacer !== "function" &&
+                    (typeof replacer !== "object" ||
+                    typeof replacer.length !== "number")) {
+                throw new Error("JSON.stringify");
+            }
+
+// Make a fake root object containing our value under the key of "".
+// Return the result of stringifying the value.
+
+            return str("", {"": value});
+        };
+    }
+
+
+// If the JSON object does not yet have a parse method, give it one.
+
+    if (typeof JSON.parse !== "function") {
+        JSON.parse = function (text, reviver) {
+
+// The parse method takes a text and an optional reviver function, and returns
+// a JavaScript value if the text is a valid JSON text.
+
+            var j;
+
+            function walk(holder, key) {
+
+// The walk method is used to recursively walk the resulting structure so
+// that modifications can be made.
+
+                var k;
+                var v;
+                var value = holder[key];
+                if (value && typeof value === "object") {
+                    for (k in value) {
+                        if (Object.prototype.hasOwnProperty.call(value, k)) {
+                            v = walk(value, k);
+                            if (v !== undefined) {
+                                value[k] = v;
+                            } else {
+                                delete value[k];
+                            }
+                        }
+                    }
+                }
+                return reviver.call(holder, key, value);
+            }
+
+
+// Parsing happens in four stages. In the first stage, we replace certain
+// Unicode characters with escape sequences. JavaScript handles many characters
+// incorrectly, either silently deleting them, or treating them as line endings.
+
+            text = String(text);
+            rx_dangerous.lastIndex = 0;
+            if (rx_dangerous.test(text)) {
+                text = text.replace(rx_dangerous, function (a) {
+                    return "\\u" +
+                            ("0000" + a.charCodeAt(0).toString(16)).slice(-4);
+                });
+            }
+
+// In the second stage, we run the text against regular expressions that look
+// for non-JSON patterns. We are especially concerned with "()" and "new"
+// because they can cause invocation, and "=" because it can cause mutation.
+// But just to be safe, we want to reject all unexpected forms.
+
+// We split the second stage into 4 regexp operations in order to work around
+// crippling inefficiencies in IE's and Safari's regexp engines. First we
+// replace the JSON backslash pairs with "@" (a non-JSON character). Second, we
+// replace all simple value tokens with "]" characters. Third, we delete all
+// open brackets that follow a colon or comma or that begin the text. Finally,
+// we look to see that the remaining characters are only whitespace or "]" or
+// "," or ":" or "{" or "}". If that is so, then the text is safe for eval.
+
+            if (
+                rx_one.test(
+                    text
+                        .replace(rx_two, "@")
+                        .replace(rx_three, "]")
+                        .replace(rx_four, "")
+                )
+            ) {
+
+// In the third stage we use the eval function to compile the text into a
+// JavaScript structure. The "{" operator is subject to a syntactic ambiguity
+// in JavaScript: it can begin a block or an object literal. We wrap the text
+// in parens to eliminate the ambiguity.
+
+                j = eval("(" + text + ")");
+
+// In the optional fourth stage, we recursively walk the new structure, passing
+// each name/value pair to a reviver function for possible transformation.
+
+                return (typeof reviver === "function")
+                    ? walk({"": j}, "")
+                    : j;
+            }
+
+// If the text is not JSON parseable, then a SyntaxError is thrown.
+
+            throw new SyntaxError("JSON.parse");
+        };
+    }
+}());
+endtextblock
+
+

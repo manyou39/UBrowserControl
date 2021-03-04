@@ -1,0 +1,52 @@
+module Settings
+    const IniFile = "UBrowserControl.ini"
+
+    function Force(b = NULL)
+        section = "UBrowserControl"
+        key = "Force"
+        if b <> NULL then
+            writeini(section, key, val(b, 0), IniFile)
+            result = FALSE
+        else
+            result = val(readini(section, key, IniFile), 0) <> 0
+        endif
+    fend
+    function Chrome(path = NULL)
+        section = "BrowserPath"
+        key = "Chrome"
+        if path = NULL then
+            result = readini(section, key, IniFile)
+        else
+            writeini(section, key, path, IniFile)
+            result = EMPTY
+        endif
+    fend
+    function MsEdge(path = NULL)
+        section = "BrowserPath"
+        key = "MsEdge"
+        if path = NULL then
+            result = readini(section, key, IniFile)
+        else
+            writeini(section, key, path, IniFile)
+            result = EMPTY
+        endif
+    fend
+    function Firefox(path = NULL)
+        section = "BrowserPath"
+        key = "Firefox"
+        if path = NULL then
+            result = readini(section, key, IniFile)
+        else
+            writeini(section, key, path, IniFile)
+            result = EMPTY
+        endif
+    fend
+    
+    procedure Init()
+        Force(1)
+        Chrome("")
+        MsEdge("")
+        Firefox("")
+    fend
+    
+endmodule
