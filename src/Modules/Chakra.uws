@@ -1,0 +1,109 @@
+module Json
+    const IsChakra = TRUE
+
+    dim ScriptControl,CodeObject
+
+    procedure JSON
+        if ! Chakra.Check() then
+            Chakra.Set()
+        endif
+        ScriptControl = createoleobj("ScriptControl")
+        with ScriptControl
+            .Language = "Chakra"
+            .ExecuteStatement(jsStatement)
+            .AddObject("dictionary", createoleobj("Scripting.Dictionary"))
+            CodeObject = .CodeObject
+        endwith
+    fend
+    
+    function New(json = "{}")
+        result = Parse(json)
+    fend
+
+    function Parse(str)
+        try
+            result = CodeObject.JSON.parse(str)
+        except
+            result = NOTHING
+        endtry
+    fend
+    
+    function Stringify(json, indent = "", CRLF = FALSE)
+        try
+            result = CodeObject.JSON.stringify(json, null, indent)
+            if CRLF then
+                result = replace(result, chr(10), "<#CR>")
+            endif
+        except
+            result = EMPTY
+        endtry
+    fend
+
+    function AddObject(base, name, value)
+        try
+            CodeObject.Add(base, name, value)
+            result = TRUE
+        except
+            result = FALSE
+        endtry
+    fend
+    
+    textblock jsStatement
+// 配列アクセス用
+// 第二引数に値を渡した場合は代入、省略した場合は値取得
+Array.prototype.Item = function(i, value)
+{
+    if (value === undefined)
+        return this[i];
+    this[i] = value;
+};
+Array.prototype.item = Array.prototype.Item;
+
+Array.prototype.ToSafeArray = function()
+{
+    dictionary.RemoveAll()
+    for (var i = 0; i < this.length; i++) {
+        dictionary.add(i, this[i]);
+    }
+    return dictionary.Items();
+};
+
+// Object追加用、AddObject()で使う
+function Add(obj, name, value)
+{
+    obj[name] = value;
+};
+
+Object.prototype.GetValue = function(name)
+{
+    return this[name];
+};
+
+Object.prototype.HasValue = function(name)
+{
+    return this[name] ? true: false;
+};
+    endtextblock
+endmodule
+
+module Chakra
+    dim path = "HKEY_CURRENT_USER\SOFTWARE\Classes\Chakra\CLSID\"
+    dim clsid = "{1b7cd997-e5ff-4932-a7a6-2a9e636da385}"
+    
+    function Check()
+        ws = createoleobj("WScript.Shell")
+        COM_ERR_IGN
+        result = ws.RegRead(path) = clsid
+        COM_ERR_RET
+    fend
+
+    function Set()
+        ws = createoleobj("WScript.Shell")
+        COM_ERR_IGN
+        ws.RegWrite(path, clsid)
+        COM_ERR_RET
+        result = Check()
+    fend
+    
+    
+endmodule

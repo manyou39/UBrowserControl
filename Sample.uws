@@ -1,0 +1,4 @@
+call UBrowserControl
+
+id = Browser.MsEdge(9223)
+Browser.Navigate(id, "http://example.selenium.jp/reserveApp/")
