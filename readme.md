@@ -27,22 +27,23 @@ Wiindows 10 以上
 対応状況
 ----
 
-|       機能名       |       関数名       | Chrome | MsEdge | Firefox |    備考    |
-|--------------------|--------------------|--------|--------|---------|------------|
-| Chromeを開く       | Browser.Chrome     | 0.0.1  |        |         |            |
-| MsEdgeを開く       | Browser.MsEdge     |        | 0.0.1  |         |            |
-| Firefoxを開く      | Browser.Firefox    |        |        | 0.0.1   |            |
-| headless           |                    | 0.0.1  | 0.0.1  |         | 引数で指定 |
-| タブを閉じる       | Browser.CloseTab   | 0.0.1  | 0.0.1  |         |            |
-| URLを開く          | Browser.Navigate   | 0.0.1  | 0.0.1  | 0.0.1   |            |
-| リロード           |                    |        |        |         |            |
-| タブ一覧取得       | Browser.GetTabList | 0.0.1  | 0.0.1  |         |            |
-| タブの切り換え     | Browser.SwitchTab  | 0.0.1  | 0.0.1  |         |            |
-| エレメント取得     |                    |        |        |         |            |
-| エレメント操作     |                    |        |        |         |            |
-| JavaScript実行     |                    |        |        |         |            |
-| ダイアログ操作     |                    |        |        |         |            |
-| スクリーンショット |                    |        |        |         |            |
+|       機能名       |        関数名        | Chrome | MsEdge | Firefox |    備考    |
+|--------------------|----------------------|--------|--------|---------|------------|
+| Chromeを開く       | Browser.Chrome       | 0.0.1  |        |         |            |
+| MsEdgeを開く       | Browser.MsEdge       |        | 0.0.1  |         |            |
+| Firefoxを開く      | Browser.Firefox      |        |        | 0.0.1   |            |
+| headless           |                      | 0.0.1  | 0.0.1  |         | 引数で指定 |
+| タブを閉じる       | Browser.CloseTab     | 0.0.1  | 0.0.1  |         |            |
+| URLを開く          | Browser.Navigate     | 0.0.1  | 0.0.1  | 0.0.1   |            |
+| リロード           |                      |        |        |         |            |
+| タブ一覧取得       | Browser.GetTabList   | 0.0.1  | 0.0.1  |         |            |
+| タブの切り換え     | Browser.SwitchTab    | 0.0.1  | 0.0.1  |         |            |
+| エレメント取得     | Browser.FindElement  |        |        |         |            |
+|                    | Browser.FindElements |        |        |         |            |
+| エレメント操作     |                      |        |        |         |            |
+| JavaScript実行     |                      |        |        |         |            |
+| ダイアログ操作     |                      |        |        |         |            |
+| スクリーンショット |                      |        |        |         |            |
 
 使い方
 ----

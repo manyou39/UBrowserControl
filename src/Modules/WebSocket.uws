@@ -33,7 +33,7 @@ module WebSocket
 
             if ! WinHttpSendRequest(hRequest, NULL, 0, 0, 0, 0, 0) then
                 err = GetLastError()
-                emsg = "failed on WinHttpSendRequest (" + err + ")"
+                emsg = "failed on WinHttpSetOption (" + err + ")"
                 exit
             endif
 
@@ -66,15 +66,20 @@ module WebSocket
                     WinHttpCloseHandle(hWebSocket)
                 endif
                 msgbox(emsg)
-                exitexit
             endif
         endtry
         result = hWebSocket
     fend
 
-    function Send(hWebSocket, json)
-        dim message = encode(json, CODE_UTF8)
-        dim size = lengthb(message)
+    function Send(hWebSocket, json = NULL)
+        dim message, size
+        if json = NULL then
+            message = NULL
+            size = 0
+        else
+            message = encode(json, CODE_UTF8)
+            size = lengthb(message)
+        endif
         dim buffer = format(chr(0), BufferSize)
         dim received, buffertype, err, emsg
         try
@@ -91,11 +96,10 @@ module WebSocket
         finally
             if length(emsg) then
                 msgbox(emsg)
-                exitexit
             endif
         endtry
 
-        result = buffer
+        result = decode(buffer, CODE_UTF8)
     fend
 
 endmodule

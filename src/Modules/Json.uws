@@ -1,5 +1,7 @@
 
 module JSON
+    const IsChakra = FALSE
+
     procedure JSON
         ScriptControl = createoleobj("ScriptControl")
         with ScriptControl

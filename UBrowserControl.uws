@@ -11,12 +11,16 @@ module Browser
     const MsEdge  = "msedge.exe"
     dim WebSocketId = 0
     dim eventHandler = EMPTY
-
+    dim debug = FALSE
     procedure Browser
         if (kindofos() < 30) and ! Settings.Force() then
             msgbox("サポート外OSです")
             exitexit
         endif
+    fend
+
+    procedure Debug(b)
+        debug = b
     fend
 
     function Chrome(port = 9222, headless = FALSE)
@@ -107,6 +111,7 @@ module Browser
     
     function GetDocument(bid)
         body = NewWebSocketBody("DOM.getDocument")
+        AddParam(body, "depth", -1)
         res = SendWebSocket(bid, body)
         if res = NOTHING then
             result = EMPTY
@@ -145,19 +150,32 @@ module Browser
         res = SendWebSocket(bid, body)
         result = EMPTY
         if res <> NOTHING then
-            result = EMPTY
             arr = res.attributes.ToSafeArray()
             for i = 0 to length(arr) - 1 step 2
                 if arr[i] = attribute then
                     result = arr[i + 1]
+                    break
                 endif
             next
+        endif
+    fend
+
+    function SetAttribute(bid, elementId, attribute, value)
+        body = NewWebSocketBody("DOM.setAttributeValue")
+        AddParam(body, "nodeId", elementId)
+        AddParam(body, "name", attribute)
+        AddParam(body, "value", value)
+        res = SendWebSocket(bid, body, "DOM.attributeModified")
+        result = FALSE
+        if res <> NOTHING then
+            result = res.value = value
         endif
     fend
 
     
     procedure Dispose()
         for key in WebSockets
+            WinHttpWebSocketClose(WebSockets[key])
             WinHttpCloseHandle(WebSockets[key])
             WebSockets[key] = 0
         next
@@ -247,38 +265,52 @@ module Browser
         endif
     fend
 
-    function SendWebSocket(bid, body, raw = FALSE)
+    function SendWebSocket(bid, body, event = "", raw = FALSE)
         h = GetWebSocketHandle(bid)
         ok = FALSE
         // 送信したIDでレスポンスが返るまで繰り返す
+        jbody = Json.Stringify(body)
+        if debug then
+            print "[DEBUG] [SendWebSocket]"
+            print "        [body] " + jbody
+        endif
+        result = NOTHING
         repeat
-            res = WebSocket.Send(h, Json.Stringify(body))
-            if raw then
-                result = res
-                exit
-            else
-                obj = Json.Parse(res)
-                select TRUE
-                    // 結果が帰ってIDが一致したら成功
-                    case obj.HasValue("result")
-                        ok = obj.id = WebSocketId
-                        result = obj.result
-                    // イベント発生
-                    case obj.HasValue("method")
-                        if length(eventHandler) then
-                            j = Json.Stringify(obj, 2, TRUE)
-                            eval(eventHandler + "(obj, j)")
-                        endif
-                    // エラー発生時はNOTHING返して終了
-                    case obj.HasValue("error")
-                        emsg = "WebSocket Error (" + body.method + ")<#CR>" + obj.error.message
-                        msgbox(emsg)
-                        result = NOTHING
-                        exit
-                    default
-                        
-                selend
+            res = WebSocket.Send(h, jbody)
+            if debug then
+                print "        [response] " + res
             endif
+            obj = Json.Parse(res)
+            select TRUE
+                // 結果が帰ってIDが一致したら成功
+                case obj.HasValue("result")
+                    ok = obj.id = WebSocketId
+                    if raw then
+                        result = res
+                    else
+                        if length(event) = 0 then
+                            result = obj.result
+                        endif
+                    endif
+                // イベント発生
+                case obj.HasValue("method")
+                    if event = obj.method then
+                        result = obj.params
+                    endif
+                    if length(eventHandler) then
+                        j = Json.Stringify(obj, 2, TRUE)
+                        eval(eventHandler + "(obj, j)")
+                    endif
+                // エラー発生時はNOTHING返して終了
+                case obj.HasValue("error")
+                    emsg = "WebSocket Error (" + body.method + ")<#CR>" + obj.error.message
+                    if debug then print "[DEBUG] " + emsg
+                    msgbox(emsg)
+                    result = NOTHING
+                    exit
+                default
+                    
+            selend
         until ok
     fend
 
@@ -487,7 +519,7 @@ module WebSocket
 
             if ! WinHttpSendRequest(hRequest, NULL, 0, 0, 0, 0, 0) then
                 err = GetLastError()
-                emsg = "failed on WinHttpSendRequest (" + err + ")"
+                emsg = "failed on WinHttpSetOption (" + err + ")"
                 exit
             endif
 
@@ -520,7 +552,6 @@ module WebSocket
                     WinHttpCloseHandle(hWebSocket)
                 endif
                 msgbox(emsg)
-                exitexit
             endif
         endtry
         result = hWebSocket
@@ -545,11 +576,10 @@ module WebSocket
         finally
             if length(emsg) then
                 msgbox(emsg)
-                exitexit
             endif
         endtry
 
-        result = buffer
+        result = decode(buffer, CODE_UTF8)
     fend
 
 endmodule
@@ -666,7 +696,7 @@ module Util
                     OutParams = .ExecMethod_("GetStringValue", InParams)
                     select OutParams.ReturnValue
                         case 0
-                            path = OutParams.sValue
+                            result = OutParams.sValue
                             exit
                     selend
                 endwith
@@ -705,6 +735,8 @@ endmodule
 
 
 module JSON
+    const IsChakra = FALSE
+
     procedure JSON
         ScriptControl = createoleobj("ScriptControl")
         with ScriptControl

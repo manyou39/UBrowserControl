@@ -1,7 +1,19 @@
 OPTION SPECIALCHAR
+OPTION DEFAULTFONT="ms gothic"
 
 path = "..\UBrowserControl.uws"
 const version = "0.0.1"
+
+dim chakra
+// select slctbox(SLCT_STR, 0, replace(msg, "%version%", version), "Chakra", "Json2")
+//     case "Chakra"
+//         chakra = TRUE
+//     case "Json2"
+//         chakra = FALSE
+//     default
+//         exit
+// selend
+chakra = FALSE
 
 deletefile(path)
 out = fopen(path, F_READ or F_WRITE8)
@@ -13,6 +25,17 @@ for file in split(files, "<#CR>")
     fclose(fid)
     fput(out, script)
 next
+
+// use either Chakra or json2
+if chakra then
+    file = ".\Modules\Chakra.uws"
+else
+    file = ".\Modules\Json.uws"
+endif
+fid = fopen(file, F_READ)
+script = fget(fid, F_ALLTEXT)
+fclose(fid)
+fput(out, script)
 
 fclose(out)
 
@@ -35,5 +58,16 @@ textblock files
 .\Modules\WebRequest.uws
 .\Modules\WinHttp.uws
 .\Modules\Util.uws
-.\Modules\Json.uws
+.\Modules\Params.uws
+endtextblock
+
+textblock msg
+***************************
+* UBrowserControl Builder *
+***************************
+
+UBrowserControl
+Version: %version%
+
+Choose Json core to build
 endtextblock

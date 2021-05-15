@@ -40,7 +40,7 @@ module Util
                     OutParams = .ExecMethod_("GetStringValue", InParams)
                     select OutParams.ReturnValue
                         case 0
-                            path = OutParams.sValue
+                            result = OutParams.sValue
                             exit
                     selend
                 endwith

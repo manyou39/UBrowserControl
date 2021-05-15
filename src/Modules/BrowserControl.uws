@@ -7,12 +7,17 @@ module Browser
     const MsEdge  = "msedge.exe"
     dim WebSocketId = 0
     dim eventHandler = EMPTY
+    dim debug = FALSE
 
     procedure Browser
         if (kindofos() < 30) and ! Settings.Force() then
             msgbox("サポート外OSです")
             exitexit
         endif
+    fend
+
+    procedure Debug(b)
+        debug = b
     fend
 
     function Chrome(port = 9222, headless = FALSE)
@@ -31,8 +36,21 @@ module Browser
 
     procedure Activate(bid)
         body = NewWebSocketBody("Page.bringToFront")
-        print SendWebSocket(bid, body)
+        SendWebSocket(bid, body)
     fend
+
+    function WaitForResponse(bid, body, timeout = 10)
+        limit = gettime() + timeout
+        while limit > gettime()
+            result = SendWebSocket(bid, body)
+            if result = NOTHING then
+                sleep(0.3)
+            else
+                break
+            endif
+        wend
+    fend
+    
     
     function Navigate(bid, url, newtab = FALSE)
         result = EMPTY
@@ -42,6 +60,7 @@ module Browser
             body = NewWebSocketBody("Page.navigate")
             AddParam(body, "url", url)
             SendWebSocket(bid, body)
+            WaitForPageLoad(bid)
         endif
     fend
     
@@ -103,6 +122,7 @@ module Browser
     
     function GetDocument(bid)
         body = NewWebSocketBody("DOM.getDocument")
+        AddParam(body, "depth", -1)
         res = SendWebSocket(bid, body)
         if res = NOTHING then
             result = EMPTY
@@ -111,11 +131,12 @@ module Browser
         endif
     fend
 
-    function FindElement(bid, elementId, selector)
+    function FindElement(bid, elementId, selector, wait = 1)
         body = NewWebSocketBody("DOM.querySelector")
         AddParam(body, "nodeId", elementId)
         AddParam(body, "selector", selector)
-        res = SendWebSocket(bid, body)
+        // res = SendWebSocket(bid, body)
+        res = WaitForResponse(bid, body, wait)
         if res = NOTHING then
             result = EMPTY
         else
@@ -123,11 +144,12 @@ module Browser
         endif
     fend
     
-    function FindElements(bid, elementId, selector)
+    function FindElements(bid, elementId, selector, wait = 1)
         body = NewWebSocketBody("DOM.querySelectorAll")
         AddParam(body, "nodeId", elementId)
         AddParam(body, "selector", selector)
-        res = SendWebSocket(bid, body)
+        // res = SendWebSocket(bid, body)
+        res = WaitForResponse(bid, body, wait)
         if res = NOTHING then
             result = safearray(0, -1)
         else
@@ -141,25 +163,85 @@ module Browser
         res = SendWebSocket(bid, body)
         result = EMPTY
         if res <> NOTHING then
-            result = EMPTY
             arr = res.attributes.ToSafeArray()
             for i = 0 to length(arr) - 1 step 2
                 if arr[i] = attribute then
                     result = arr[i + 1]
+                    break
                 endif
             next
         endif
     fend
 
+    function SetAttribute(bid, elementId, attribute, value)
+        body = NewWebSocketBody("DOM.setAttributeValue")
+        AddParam(body, "nodeId", elementId)
+        AddParam(body, "name", attribute)
+        AddParam(body, "value", value)
+        res = SendWebSocket(bid, body, "DOM.attributeModified")
+        result = FALSE
+        if res <> NOTHING then
+            result = res.value = value
+        endif
+    fend
+
+    // left, top, right, bottom
+    function GetElementRect(bid, elementId, box = "content")
+        body = NewWebSocketBody("DOM.getBoxModel")
+        AddParam(body, "nodeId", elementId)
+        res = SendWebSocket(bid, body)
+        result = safearray(0, 3)
+        if res <> NOTHING then
+            dim quad
+            select box
+                case "content"
+                    quad = res.model.content.ToSafeArray()
+                case "padding"
+                    quad = res.model.padding.ToSafeArray()
+                case "margin"
+                    quad = res.model.margin.ToSafeArray()
+                case "border"
+                    quad = res.model.border.ToSafeArray()
+                default
+                    exit
+            selend
+            result[0] = quad[0]
+            result[1] = quad[1]
+            result[2] = quad[2]
+            result[3] = quad[5]
+        endif
+    fend
+    
+
+    procedure Click(bid, elementId, button = Button.Left)
+        rect = GetElementRect(bid, elementId)
+        body = NewWebSocketBody("Input.dispatchMouseEvent")
+        AddParam(body, "type", "mousePressed")
+        AddParam(body, "x", rect[0])
+        AddParam(body, "y", rect[1])
+        AddParam(body, "button", button)
+        AddParam(body, "clickCount", 1)
+        res = SendWebSocket(bid, body)
+        AddParam(body, "type", "mouseReleased")
+        res = SendWebSocket(bid, body)
+    fend
+    
     
     procedure Dispose()
         for key in WebSockets
+            WinHttpWebSocketClose(WebSockets[key])
             WinHttpCloseHandle(WebSockets[key])
             WebSockets[key] = 0
         next
     fend
 
     // 内部関数群
+    function Initialize(bid)
+        body = NewWebSocketBody("Runtime.enable")
+        SendWebSocket(bid, body)
+        result = 0
+    fend
+    
 
     function Start(browser, port, headless)
         result = -1
@@ -188,11 +270,19 @@ module Browser
             exec(command)
         endif
         dim emsg
-        if WaitBrowser(browser, port, emsg) then
+        pid = WaitBrowser(browser, port, emsg)
+        if pid > 0 then
             result = GetNextBid()
-            NewSession(result, browser, "localhost", port)
+            wid = GetWindowIdFromPid(pid)
+            NewSession(result, browser, "localhost", port, wid)
             list = GetTabList(result)
+            if length(list) = 0 then
+                msgbox("エラー: タブ一覧の取得に失敗しました")
+                exitexit 1
+            endif
             SetCurrentPageId(result, list[0].id)
+
+            // Initialize(result)
         else
             if length(emsg) then
                 msgbox(emsg)
@@ -200,12 +290,21 @@ module Browser
         endif
     fend
     
+    procedure NetWorkEvent(bid, enable)
+        if enable = FALSE then
+            body = NewWebSocketBody("Network.disable")
+        else
+            body = NewWebSocketBody("Network.enable")
+        endif
+        SendWebSocket(bid, body)
+    fend
+    
     
     textblock JsonTemplate
 {
     
     "id": 0,
-    "method": null,
+    "method": "",
     "params": {}
 }
     endtextblock
@@ -243,38 +342,122 @@ module Browser
         endif
     fend
 
-    function SendWebSocket(bid, body, raw = FALSE)
+textblock json_get_ready_state
+{
+    
+    "id": 0,
+    "method": "",
+    "params": {
+        "awaitPromise": false,
+        "expression": "document.readyState",
+        "returnByValue": true
+   }
+}
+endtextblock
+textblock json_do_nothing
+{
+    
+    "id": 0,
+    "method": "",
+    "params": {
+        "expression": "1"
+   }
+}
+endtextblock
+
+
+    function WaitForPageLoad(bid, timeout = 10)
+        limit = gettime() + timeout
+        result = FALSE
+        h = GetWebSocketHandle(bid)
+        body = NewWebSocketBody("Runtime.evaluate", json_get_ready_state)
+        jbody = Json.Stringify(body)
+        once = FALSE
+        repeat
+            res = WebSocket.Send(h, jbody)
+            obj = Json.Parse(res)
+            if DEBUG then
+                print "[DEBUG: WaitForPageLoad] " + res
+            endif
+            select TRUE
+                case obj.HasValue("method")
+                case obj.HasValue("result")
+                    if obj.id = body.id then
+                        if obj.result.result.value = "complete" then
+                            result = TRUE
+                            break
+                        // else
+                        //     body = NewWebSocketBody("Runtime.evaluate", json_get_ready_state)
+                        //     jbody = Json.Stringify(body)
+                        //     once = FALSE
+                        endif
+                    endif
+                case obj.HasValue("error")
+                    
+                default
+                    
+            selend
+            sleep(0.3)
+            // if ! once then
+            //     once = TRUE
+            //     body = NewWebSocketBody("Runtime.evaluate", json_do_nothing)
+            //     jbody = Json.Stringify(body)
+            // endif
+        until limit < gettime()
+    fend
+    
+
+    function SendWebSocket(bid, body, event = "", raw = FALSE)
         h = GetWebSocketHandle(bid)
         ok = FALSE
         // 送信したIDでレスポンスが返るまで繰り返す
+        jbody = Json.Stringify(body)
+        if debug then
+            print "[DEBUG] [SendWebSocket]"
+        endif
+        result = NOTHING
         repeat
-            res = WebSocket.Send(h, Json.Stringify(body))
-            if raw then
-                result = res
-                exit
-            else
-                obj = Json.Parse(res)
-                select TRUE
-                    // 結果が帰ってIDが一致したら成功
-                    case obj.HasValue("result")
-                        ok = obj.id = WebSocketId
-                        result = obj.result
-                    // イベント発生
-                    case obj.HasValue("method")
-                        if length(eventHandler) then
-                            j = Json.Stringify(obj, 2, TRUE)
-                            eval(eventHandler + "(obj, j)")
-                        endif
-                    // エラー発生時はNOTHING返して終了
-                    case obj.HasValue("error")
-                        emsg = "WebSocket Error (" + body.method + ")<#CR>" + obj.error.message
-                        msgbox(emsg)
-                        result = NOTHING
-                        exit
-                    default
-                        
-                selend
+            if debug then
+                print "        [body ("+lengthb(jbody)+")] " + jbody
             endif
+            res = WebSocket.Send(h, jbody)
+            if debug then
+                print "        [response] " + res
+            endif
+            obj = Json.Parse(res)
+            select TRUE
+                // 結果が帰ってIDが一致したら成功
+                case obj.HasValue("result")
+                    ok = obj.id = body.id
+                    if raw then
+                        result = JSON.Stringify(obj, 2, TRUE)
+                    else
+                        if length(event) = 0 then
+                            result = obj.result
+                        endif
+                    endif
+                // イベント発生
+                case obj.HasValue("method")
+                    if debug then
+                        print "        [EVENT] " + res
+                    endif
+                    if event = obj.method then
+                        result = obj.params
+                    endif
+                    if length(eventHandler) then
+                        j = Json.Stringify(obj, 2, TRUE)
+                        eval(eventHandler + "(obj, j)")
+                    endif
+                // エラー発生時はNOTHING返して終了
+                case obj.HasValue("error")
+                    if debug then
+                        print "        [ERROR] " + res
+                    endif
+                    result = NOTHING
+                    exit
+                default
+                    
+            selend
         until ok
     fend
 
@@ -287,15 +470,17 @@ module Browser
     const s_host    = 1
     const s_port    = 2
     const s_current = 3
-    const session_array_ubound = 3
+    const s_wid     = 4
+    const session_array_ubound = 4
     
-    procedure NewSession(bid, browser, host, port)
+    procedure NewSession(bid, browser, host, port, wid)
         session = safearray(0, session_array_ubound)
 
         session[s_browser] = browser
         session[s_host]    = host
         session[s_port]    = port
         session[s_current] = EMPTY
+        session[s_wid]     = wid
 
         sessions[bid] = session
     fend
@@ -340,6 +525,26 @@ module Browser
             result = EMPTY
         endif
     fend
+
+    function GetWindowId(bid)
+        session = sessions[bid]
+        if is_safearray(session) then
+            result = session[s_wid]
+        else
+            result = EMPTY
+        endif
+    fend
+    
+    
+    function GetWindowIdFromPid(processId)
+        result = -1
+        for id in getallwin()
+            if status(id, ST_PROCESS) = processId then
+                result = id
+                break
+            endif
+        next
+    fend
     
 
     function FindBrowser(name, port)
@@ -362,11 +567,11 @@ module Browser
                 endif
             endwith
         endwith
-        result = name = pname
+        result = pname = name
     fend
     
     function WaitBrowser(name, port, var emsg, timeout = 5)
-        result = FALSE
+        result = 0
         with createoleobj("WbemScripting.SWbemLocator")
             with .ConnectServer(".", "Root\StandardCimv2")
                 limit = gettime() + timeout
@@ -383,12 +588,14 @@ module Browser
                 process = .ExecQuery("select Name from win32_process where ProcessId = " + pid)
                 if process.count then
                     pname = process.ItemIndex(0).Properties_("Name").Value
+                    if pname = name then
+                        result = pid
+                    endif
                 else
                     exit
                 endif
             endwith
         endwith
-        result = name = pname
         if ! result then
             emsg = port + "で待ち受けているプロセスが" + name + "ではありません (" + pname + ")"
         endif
