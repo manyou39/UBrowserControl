@@ -1,8 +1,8 @@
 module Button
-    const None    = "none"
     const Left    = "left"
     const Middle  = "middle"
     const Right   = "right"
     const Back    = "back"
     const Forward = "forward"
+    const None    = "none"
 endmodule

@@ -1,23 +1,23 @@
 OPTION SPECIALCHAR
 OPTION DEFAULTFONT="ms gothic"
 
-path = "..\UBrowserControl.uws"
+const path = "..\UBrowserControl.uws"
 const version = "0.0.1"
 
 dim chakra
-// select slctbox(SLCT_STR, 0, replace(msg, "%version%", version), "Chakra", "Json2")
-//     case "Chakra"
-//         chakra = TRUE
-//     case "Json2"
-//         chakra = FALSE
-//     default
-//         exit
-// selend
-chakra = FALSE
+dim engine = slctbox(SLCT_STR, 0, replace(msg, "%version%", version), "Chakra", "Json2")
+select engine
+    case "Chakra"
+        chakra = TRUE
+    case "Json2"
+        chakra = FALSE
+    default
+        exit
+selend
 
 deletefile(path)
 out = fopen(path, F_READ or F_WRITE8)
-fput(out, UBrowserControl(version))
+fput(out, UBrowserControl(version, engine))
 
 for file in split(files, "<#CR>")
     fid = fopen(file, F_READ)
@@ -39,14 +39,16 @@ fput(out, script)
 
 fclose(out)
 
-function UBrowserControl(version)
+function UBrowserControl(version, engine)
     result = replace(UBrowserControl, "%version%", version)
+    result = replace(result, "%engine%", engine)
 fend
 
 
 textblock UBrowserControl
 module UBrowserControl
     const Version = "%version%"
+    const Engine = "%engine%"
 endmodule
 
 endtextblock
@@ -69,5 +71,5 @@ textblock msg
 UBrowserControl
 Version: %version%
 
-Choose Json core to build
+Choose script engine
 endtextblock

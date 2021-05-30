@@ -3,6 +3,9 @@ UBrowserControl
 
 UWSC用ブラウザ操作モジュール
 
+*試作版であり正常動作は全く保証されていません*  
+*そのあたりがご理解いただける方のみご利用ください*  
+
 特徴
 ----
 
@@ -27,23 +30,24 @@ Wiindows 10 以上
 対応状況
 ----
 
-|       機能名       |        関数名        | Chrome | MsEdge | Firefox |    備考    |
-|--------------------|----------------------|--------|--------|---------|------------|
-| Chromeを開く       | Browser.Chrome       | 0.0.1  |        |         |            |
-| MsEdgeを開く       | Browser.MsEdge       |        | 0.0.1  |         |            |
-| Firefoxを開く      | Browser.Firefox      |        |        | 0.0.1   |            |
-| headless           |                      | 0.0.1  | 0.0.1  |         | 引数で指定 |
-| タブを閉じる       | Browser.CloseTab     | 0.0.1  | 0.0.1  |         |            |
-| URLを開く          | Browser.Navigate     | 0.0.1  | 0.0.1  | 0.0.1   |            |
-| リロード           |                      |        |        |         |            |
-| タブ一覧取得       | Browser.GetTabList   | 0.0.1  | 0.0.1  |         |            |
-| タブの切り換え     | Browser.SwitchTab    | 0.0.1  | 0.0.1  |         |            |
-| エレメント取得     | Browser.FindElement  |        |        |         |            |
-|                    | Browser.FindElements |        |        |         |            |
-| エレメント操作     |                      |        |        |         |            |
-| JavaScript実行     |                      |        |        |         |            |
-| ダイアログ操作     |                      |        |        |         |            |
-| スクリーンショット |                      |        |        |         |            |
+|       機能名       |        関数名         | Chrome | MsEdge | Firefox |    備考    |
+|--------------------|-----------------------|--------|--------|---------|------------|
+| Chromeを開く       | Browser.Chrome        | 0.0.1  |        |         |            |
+| MsEdgeを開く       | Browser.MsEdge        |        | 0.0.1  |         |            |
+| Firefoxを開く      | Browser.Firefox       |        |        | 0.0.1   |            |
+| headless           |                       | 0.0.1  | 0.0.1  |         | 引数で指定 |
+| タブを閉じる       | Browser.CloseTab      | 0.0.1  | 0.0.1  |         |            |
+| URLを開く          | Browser.Navigate      | 0.0.1  | 0.0.1  | 0.0.1   |            |
+| リロード           |                       |        |        |         |            |
+| タブ一覧取得       | Browser.GetTabList    | 0.0.1  | 0.0.1  |         |            |
+| タブの切り換え     | Browser.SwitchTab     | 0.0.1  | 0.0.1  |         |            |
+| エレメント取得     | Browser.FindElement   | 0.0.1  |        |         |            |
+|                    | Browser.FindElements  | 0.0.1  |        |         |            |
+| エレメント操作     |                       |        |        |         |            |
+| - クリック         | Browser.ClickElement  | 0.0.1  | 0.0.1  |         |            |
+| JavaScript実行     | Browser.ExecuteScript | 0.0.1  | 0.0.1  |         |            |
+| ダイアログ操作     |                       |        |        |         |            |
+| スクリーンショット |                       |        |        |         |            |
 
 使い方
 ----
@@ -76,4 +80,17 @@ Developer Edition (またはNightly版) Firefoxのパスを設定ファイル(`U
 [BrowserPath]
 Firefox={firefoxインストールフォルダ}\firefox.exe
 ```
+
+### なにかしらのエラーで停止してしまう
+
+スクリプトエンジンがChakraになっているのが原因かもしれません  
+`build.uws`を実行し、表示されたダイアログでJson2を選択してください  
+Json2ベースの`UBrowserControl.uws`が出力されます
+
+### Json2に変更したがエラーになる
+
+以下でエラーの詳細(エラーメッセージ等)をご報告ください
+
+- [issue](https://github.com/stuncloud/UBrowserControl/issues)
+- [discord](https://discord.gg/fw7PwQuYvs)
 

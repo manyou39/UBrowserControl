@@ -76,29 +76,36 @@ module Browser
     fend
 
     function GetTabList(bid)
-        port = GetPort(bid)
-        host = GetHost(bid)
-        res = WebRequest.Send(host, port, "/json/list")
-        arr = Json.Parse("[]")
-        if res[0] = 200 then
-            list = Json.Parse(res[1])
-            for item in list.ToSafeArray()
-                select item.type
-                    case "page", "frame"
-                        obj = Json.Parse("{}")
-                        Json.AddObject(obj, "id", item.id)
-                        if item.HasValue("title") then
-                            title = item.title
-                        else
-                            title = ""
-                        endif
-                        Json.AddObject(obj, "title", title)
-                        Json.AddObject(obj, "url", item.url)
-                        arr.push(obj)
-                selend
-            next
-        endif
-        result = arr.ToSafeArray()
+        result = safearray(0, -1)
+        try
+            port = GetPort(bid)
+            host = GetHost(bid)
+            res = WebRequest.Send(host, port, "/json/list")
+            arr = Json.Parse("[]")
+            if res[0] = 200 then
+                list = Json.Parse(res[1])
+                for item in list.ToSafeArray()
+                    select item.type
+                        case "page", "frame"
+                            obj = Json.Parse("{}")
+                            Json.AddObject(obj, "id", item.id)
+                            if item.HasValue("title") then
+                                title = item.title
+                            else
+                                title = ""
+                            endif
+                            Json.AddObject(obj, "title", title)
+                            Json.AddObject(obj, "url", item.url)
+                            arr.push(obj)
+                    selend
+                next
+            endif
+            result = arr.ToSafeArray()
+        except
+            print "GetTabList"
+            print TRY_ERRLINE
+            print TRY_ERRMSG
+        endtry
     fend
 
     function CloseTab(bid, pageid)
@@ -177,7 +184,7 @@ module Browser
         body = NewWebSocketBody("DOM.setAttributeValue")
         AddParam(body, "nodeId", elementId)
         AddParam(body, "name", attribute)
-        AddParam(body, "value", value)
+        AddParam(body, "value", "" + value) // 必ず文字列にする
         res = SendWebSocket(bid, body, "DOM.attributeModified")
         result = FALSE
         if res <> NOTHING then
@@ -213,7 +220,7 @@ module Browser
     fend
     
 
-    procedure Click(bid, elementId, button = Button.Left)
+    procedure ClickElement(bid, elementId, button = Button.Left)
         rect = GetElementRect(bid, elementId)
         body = NewWebSocketBody("Input.dispatchMouseEvent")
         AddParam(body, "type", "mousePressed")
@@ -225,6 +232,23 @@ module Browser
         AddParam(body, "type", "mouseReleased")
         res = SendWebSocket(bid, body)
     fend
+
+    function ExecuteScript(bid, script, var value)
+        body = NewWebSocketBody("Runtime.evaluate")
+        AddParam(body, "expression", script)
+        res = SendWebSocket(bid, body)
+        result = FALSE
+        if res <> NOTHING then
+            if res.result.HasValue("subtype") then
+                result = FALSE
+                value = res.result.description
+            else
+                result = TRUE
+                value = res.result.value
+            endif
+        endif
+    fend
+    
     
     
     procedure Dispose()
@@ -244,50 +268,55 @@ module Browser
     
 
     function Start(browser, port, headless)
-        result = -1
-        select browser
-            case Chrome, Firefox, MsEdge
-            default
-                msgbox("不正なブラウザ")
-                exit
-        selend
-        if ! FindBrowser(browser, port) then
-            path = Util.GetBrowserPath(browser)
+        try
+            result = -1
             select browser
-                case Chrome, MsEdge
-                    command = "<#DBL>" + path + "<#DBL> --remote-debugging-port=" + port
-                    if headless then
-                        command = command + " --disable-gpu --headless"
-                    endif
-                case Firefox
-                    command = "<#DBL>" + path + "<#DBL> --remote-debugging-port " + port
-                    if headless then
-                        command = command + " -headless"
-                    endif
+                case Chrome, Firefox, MsEdge
                 default
-                    
+                    msgbox("不正なブラウザ")
+                    exit
             selend
-            exec(command)
-        endif
-        dim emsg
-        pid = WaitBrowser(browser, port, emsg)
-        if pid > 0 then
-            result = GetNextBid()
-            wid = GetWindowIdFromPid(pid)
-            NewSession(result, browser, "localhost", port, wid)
-            list = GetTabList(result)
-            if length(list) = 0 then
-                msgbox("エラー: タブ一覧の取得に失敗しました")
-                exitexit 1
+            if ! FindBrowser(browser, port) then
+                path = Util.GetBrowserPath(browser)
+                select browser
+                    case Chrome, MsEdge
+                        command = "<#DBL>" + path + "<#DBL> --remote-debugging-port=" + port
+                        if headless then
+                            command = command + " --disable-gpu --headless"
+                        endif
+                    case Firefox
+                        command = "<#DBL>" + path + "<#DBL> --remote-debugging-port " + port
+                        if headless then
+                            command = command + " -headless"
+                        endif
+                    default
+                        
+                selend
+                exec(command)
             endif
-            SetCurrentPageId(result, list[0].id)
-
-            // Initialize(result)
-        else
-            if length(emsg) then
-                msgbox(emsg)
+            dim emsg
+            pid = WaitBrowser(browser, port, emsg)
+            if pid > 0 then
+                result = GetNextBid()
+                wid = GetWindowIdFromPid(pid)
+                NewSession(result, browser, "localhost", port, wid)
+                list = GetTabList(result)
+                if length(list) = 0 then
+                    msgbox("エラー: タブ一覧の取得に失敗しました")
+                    // exitexit 1
+                    exit
+                endif
+                SetCurrentPageId(result, list[0].id)
+                // Initialize(result)
+            else
+                if length(emsg) then
+                    msgbox(emsg)
+                endif
             endif
-        endif
+        except
+            print TRY_ERRLINE
+            print TRY_ERRMSG
+        endtry
     fend
     
     procedure NetWorkEvent(bid, enable)
