@@ -1,5 +1,5 @@
 module WebSocket
-    const BufferSize = 4096
+    const BufferSize = 512000
     function New(port, pageid, host = "localhost")
         try
             dim hSession, hConnection, hRequest, hWebSocket
@@ -80,6 +80,7 @@ module WebSocket
             message = encode(json, CODE_UTF8)
             size = lengthb(message)
         endif
+        dim 
         dim buffer = format(chr(0), BufferSize)
         dim received, buffertype, err, emsg
         try
@@ -88,7 +89,7 @@ module WebSocket
                 emsg = "WinHttpWebSocketSend Error(" + err + ")"
                 exit
             endif
-            err = WinHttpWebSocketReceive(hWebSocket, buffer, lengthb(buffer), received, buffertype)
+            err = WinHttpWebSocketReceive(hWebSocket, buffer, BufferSize, received, buffertype)
             if err then
                 emsg = "WinHttpWebSocketReceive Error(" + err + ")"
                 exit
