@@ -63,6 +63,26 @@ Browser.Navigate(BrowserId, "https://localhost/")
 
 使い方の詳細は[Wiki](https://github.com/stuncloud/UBrowserControl/wiki)にあります
 
+ビルド方法
+----
+
+ビルド済みの`UBrowserControl.uws`が同梱されているため通常はそれを実行時にcallするだけで問題はありません  
+ただし、`Chakra.dll`に依存したモジュールが含まれるため、場合によっては正常に動作しないことがあります  
+そのような場合は`src\build.uws`を実行することで`json2`ベースの`UBrowserControl.uws`を生成できます
+
+```
+(root)
+  |_src
+    |_build.uws
+    |_Modules
+      |_ (各種モジュールファイル)
+```
+
+このような構成で`build.uws`を実行してください  
+`Chakra`か`Json2`を選択するダイアログが表示されるのでいずれかを選択します  
+このときファイル構成に不備があるとエラーメッセージと共に終了します  
+構成が正常ならビルドが実行されルートフォルダに`UBrowserControl.uws`が出力されます
+
 FAQ
 ----
 
