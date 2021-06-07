@@ -14,6 +14,11 @@ select engine
     default
         exit
 selend
+dim reason
+if ! CheckFiles(chakra, reason) then
+    msgbox("必要なファイルが不足しているためビルドできません <#CR>(" + reason + ")")
+    exit
+endif
 
 deletefile(path)
 out = fopen(path, F_READ or F_WRITE8)
@@ -73,3 +78,33 @@ Version: %version%
 
 Choose script engine
 endtextblock
+
+function CheckFiles(is_chakra, var reason)
+    result = TRUE
+    result = fopen(".\Modules\", F_EXISTS)
+    if ! result then
+        reason = "Modulesフォルダがありません"
+        exit
+    endif
+    for file in split(files, "<#CR>")
+        result = fopen(file, F_EXISTS)
+        if ! result then
+            reason = replace(replace(file, ".\", ""), "\", "フォルダに") + "がありません"
+            exit
+        endif
+    next
+    if is_chakra then
+        result = fopen(".\Modules\Chakra.uws", F_EXISTS)
+        if ! result then
+            reason = "ModulesフォルダにがChakra.uwsありません"
+            exit
+        endif
+    else
+        result = fopen(".\Modules\Json.uws", F_EXISTS)
+        if ! result then
+            reason = "ModulesフォルダにがJson.uwsありません"
+            exit
+        endif
+    endif
+fend
+
