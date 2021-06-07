@@ -61,6 +61,8 @@ BrowserId = Browser.Chrome() // Chromeを起動
 Browser.Navigate(BrowserId, "https://localhost/")
 ```
 
+使い方の詳細は[Wiki](https://github.com/stuncloud/UBrowserControl/wiki)にあります
+
 FAQ
 ----
 
