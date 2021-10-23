@@ -1,3 +1,12 @@
+# 更新停止のお知らせ
+
+以下によりUBrowserControlの更新を停止します
+
+- [UWSCR 0.2.1](https://github.com/stuncloud/UWSCR/releases/tag/0.2.1)にて[同等以上の機能](https://github.com/stuncloud/UWSCR/wiki/%E3%83%96%E3%83%A9%E3%82%A6%E3%82%B6%E6%93%8D%E4%BD%9C)を実装したため
+- UWSCでの開発継続が技術的に困難であるため
+
+----
+
 UBrowserControl
 ====
 
